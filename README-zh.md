@@ -135,22 +135,25 @@ CI 会再校验同样的条件（提交必须仍是 `HEAD`，版本必须仍是�
 
 ### 更新日志
 
-release notes 与 `CHANGELOG.md` 的条目来自“上一个发布 tag 到 `HEAD`”之间的提交，由 [git-cliff](https://git-cliff.org)
-按 [`cliff.toml`](cliff.toml) 生成，因此可以在任意 checkout 里复现：
+发布说明与 `CHANGELOG.md` 条目由兼容 OpenAI 的 Chat Completions API 根据“上一个发布 tag 到 `HEAD`”之间的
+非合并提交生成。[`cliff.md`](cliff.md) 定义分类、排除的提交类型和写作规则；AI 会合并相关改动，输出简洁说明，
+不再逐条罗列提交。
 
-```
-git cliff 2026.10.23..HEAD --tag <版本>            # 该版本的 release notes
-```
+CI 为 `CHANGELOG.md` 添加版本和日期标题，生成的正文同时用于 GitHub release。API 报错或返回空内容时，工作流会
+失败；修复配置或服务后，用 `./gradlew release -PreleaseVersion=<版本>` 恢复发布。
 
-区间永远是显式传入的。同一天的 `-2` 发布在 SemVer 里是 *pre-release*（`2026.10.23-2` 排在 `2026.10.23` 之后），
-任何“按 SemVer 取最近两个 tag”的做法都会把它排到当天无后缀 tag 的后面，那个发布就没有日志可写——之前用的
-action 正是这么丢的。分节按 conventional commit 前缀：`feat` → Features、`fix` → Bug Fixes、`perf` → Performance、
-`refactor` → Refactor、`test` → Testing、`chore` → Miscellaneous Tasks，其余（包括没有前缀的提交）→ Other；
-`docs`/`style`/`build`/`ci` 丢弃，破坏性变更用 `[**breaking**]` 标出。
+### CI 配置
 
-### CI secrets
+在仓库的 Actions secrets 和 variables 中配置：
 
-只有一个：`OUTLANDS_MAVEN_TOKEN`（maven 发布令牌）。用户名 `fg` 不是秘密，直接写在 workflow 里。
+| 名称 | 存储位置 | 用途 |
+|---|---|---|
+| `OUTLANDS_MAVEN_TOKEN` | Secret | Maven 发布令牌 |
+| `OPENAI_API_KEY` | Secret | 生成更新日志的 API 密钥 |
+| `OPENAI_ENDPOINT` | Variable | 完整的 Chat Completions 地址，例如 `https://api.openai.com/v1/chat/completions` |
+| `OPENAI_MODEL` | Variable | 模型名称，默认为 `gpt-4o-mini` |
+
+Maven 发布用户名为 `fg`，直接设置在工作流中。
 
 ### 发布失败怎么办
 
@@ -158,7 +161,7 @@ action 正是这么丢的。分节按 conventional commit 前缀：`feat` → Fe
 |---|---|---|
 | 构建/测试 | 什么都没留，无 tag | 修好后 `./gradlew release`（同一个版本号） |
 | maven 上传 | 无 tag；部分上传会在其它步骤之前被识别出来 | 修好原因重跑；若已部分上传，先从 maven 删掉该版本 |
-| tag / GitHub release / CHANGELOG | 产物已在 maven，tag 可能已存在 | `./gradlew release -PreleaseVersion=<版本>` |
+| tag / AI 更新日志 / GitHub release / CHANGELOG | 产物已在 Maven，tag 可能已存在 | `./gradlew release -PreleaseVersion=<版本>` |
 
 tag 不会自动回退：它记录的是“哪个提交产出了这个版本”，而删 tag 也删不掉 maven 上的东西。想重跑已有 tag 的发布，
 不改 tag，直接用 resume。

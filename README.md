@@ -145,24 +145,27 @@ failed release from consuming a version number.
 
 ### Changelog
 
-Release notes and the `CHANGELOG.md` entry come from the commits between the previous release tag and `HEAD`, rendered
-by [git-cliff](https://git-cliff.org) with [`cliff.toml`](cliff.toml), so they can be reproduced from any checkout:
+Release notes and `CHANGELOG.md` entries are summarized by an OpenAI-compatible Chat Completions API, using the
+non-merge commits between the previous release tag and `HEAD`. [`cliff.md`](cliff.md) defines the categories,
+excluded commit types and writing rules. Related changes are combined into concise notes instead of listing
+every commit separately.
 
-```
-git cliff 2026.10.23..HEAD --tag <version>            # the release notes for <version>
-```
+CI adds the version and date header to `CHANGELOG.md`; the generated body is also used for the GitHub release.
+An API error or empty response fails the workflow. Fix the configuration or service, then resume the release with
+`./gradlew release -PreleaseVersion=<version>`.
 
-The range is always passed explicitly. A same-day `-2` release is a SemVer *pre-release* (`2026.10.23-2` sorts below
-`2026.10.23`), so anything that picks "the two newest tags" by SemVer puts it below the plain tag of that day and the
-release ends up without notes - which is what the previous changelog action did. Sections follow the conventional
-commit type (`feat` → Features, `fix` → Bug Fixes, `perf` → Performance, `refactor` → Refactor, `test` → Testing,
-`chore` → Miscellaneous Tasks, anything else - including commits without a type - → Other); `docs`/`style`/`build`/`ci`
-are dropped, and a breaking change is flagged with `[**breaking**]`.
+### CI configuration
 
-### CI secrets
+Configure these in the repository's Actions secrets and variables:
 
-Only one: `OUTLANDS_MAVEN_TOKEN` (the maven publishing token). The user name `fg` is not a secret and is used
-literally in the workflow.
+| Name | Storage | Purpose |
+|---|---|---|
+| `OUTLANDS_MAVEN_TOKEN` | Secret | Maven publishing token |
+| `OPENAI_API_KEY` | Secret | API key for changelog generation |
+| `OPENAI_ENDPOINT` | Variable | Full Chat Completions URL, for example `https://api.openai.com/v1/chat/completions` |
+| `OPENAI_MODEL` | Variable | Model name; defaults to `gpt-4o-mini` |
+
+The Maven publishing username is `fg` and is set directly in the workflow.
 
 ### When a release fails
 
@@ -170,7 +173,7 @@ literally in the workflow.
 |---|---|---|
 | build / tests | nothing, no tag | fix, then `./gradlew release` (same version) |
 | maven upload | nothing, no tag (a partial upload is detected before anything else) | fix the cause, re-run; if the version is half published, delete that version from maven first |
-| tag / GitHub release / CHANGELOG | artifacts are on maven, tag may exist | `./gradlew release -PreleaseVersion=<version>` |
+| tag / AI changelog / GitHub release / CHANGELOG | artifacts are on maven, tag may exist | `./gradlew release -PreleaseVersion=<version>` |
 
 Tags are never rolled back automatically: a tag records which commit produced a version, and deleting it would not
 remove anything from maven anyway. To continue a release whose tag already exists, use `-PreleaseVersion=<version>`.

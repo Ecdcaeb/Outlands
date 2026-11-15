@@ -198,25 +198,59 @@ jobs:
           fi
 
       - name: Generate the changelog
-        # An explicit range, never 'the newest two tags': a same-day CalVer '-2' is a valid SemVer *pre-release*, so any
-        # tag ordering that speaks SemVer sorts it below the plain tag of that day - which is exactly how the previous
-        # action lost the second release of a day. git-cliff reads the checkout, so the notes also can not disagree
-        # with what was built.
         id: changelog
-        uses: orhun/git-cliff-action@v4
-        with:
-          version: v2.14.2
-          config: cliff.toml
-          args: '${{ steps.tag.outputs.previous }}..HEAD --tag ${{ steps.version.outputs.version }}'
+        uses: actions/github-script@v9
         env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ENDPOINT: ${{ vars.OPENAI_ENDPOINT }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4o-mini' }}
+          PREVIOUS: ${{ steps.tag.outputs.previous }}
+          VERSION: ${{ steps.version.outputs.version }}
           OUTPUT: /tmp/changes.md
-          # PR numbers and authors come from the API; the workflow's own token can read this repository.
-          GITHUB_REPO: ${{ github.repository }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const { OPENAI_API_KEY, OPENAI_ENDPOINT, OPENAI_MODEL, PREVIOUS, VERSION, OUTPUT } = process.env;
+            if (!OPENAI_API_KEY || !OPENAI_ENDPOINT) {
+              throw new Error('Set the OPENAI_API_KEY secret and OPENAI_ENDPOINT repository variable.');
+            }
+
+            const { stdout: commits } = await exec.getExecOutput('git', [
+              'log', '--no-merges', '--format=%h %s (%an)%n%b', `${PREVIOUS}..HEAD`
+            ], { silent: true });
+            const rules = fs.readFileSync('cliff.md', 'utf8');
+            const response = await fetch(OPENAI_ENDPOINT, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${OPENAI_API_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                model: OPENAI_MODEL,
+                messages: [
+                  { role: 'system', content: rules },
+                  { role: 'user', content: `Release ${VERSION}\n\nGit commits (${PREVIOUS}..HEAD):\n${commits}` }
+                ]
+              })
+            });
+            if (!response.ok) {
+              throw new Error(`AI API ${response.status}: ${await response.text()}`);
+            }
+
+            const data = await response.json();
+            const content = data.choices?.[0]?.message?.content;
+            if (typeof content !== 'string' || !content.trim()) {
+              throw new Error('Empty AI changelog');
+            }
+            const notes = content.trim();
+            const date = VERSION.slice(0, 10).replaceAll('.', '-');
+            fs.writeFileSync(OUTPUT, `## [${VERSION}] - ${date}\n\n${notes}\n`, 'utf8');
+            core.setOutput('changelog', OUTPUT);
+            core.setOutput('content', notes);
+            core.setOutput('version', VERSION);
 
       - name: Update CHANGELOG.md
-        # The file keeps its own header and older entries; the new section goes above the newest one. Done here rather
-        # than with 'git-cliff --prepend' so the step stays idempotent: a resumed release finds its section and leaves
-        # the file alone.
+        # Preserve the header and historical entries. An existing version header makes resumed releases idempotent.
         env:
           VERSION: ${{ steps.version.outputs.version }}
           NOTES: ${{ steps.changelog.outputs.changelog }}

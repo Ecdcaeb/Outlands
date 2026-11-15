@@ -1,8 +1,7 @@
 # Changelog
-All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Release notes are summarized from commits by AI using [cliff.md](cliff.md).
+Versions use [Calendar Versioning](https://calver.org/) (`YYYY.MM.DD` in UTC, with `-2`, `-3`, etc. for additional releases on the same day).
 
 ## [2026.11.14] - 2026-11-14
 
