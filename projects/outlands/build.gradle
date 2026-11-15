@@ -1,20 +1,11 @@
-// Outlands: the patched Minecraft + loader project.
-//
-// This replaces the old ForgeGradle 6 chain (:mcp -> :minecraft -> patcher). The MCP layer
-// (decompile -> mcpcleanup -> rename, access transformers included) and the patch application live in
-// ':mcpbase'; this project only adds the loader sources on top and packages everything.
-//
-// source layout:
-//   project(':mcpbase').forgedev.patches.patched  -> patched Minecraft sources (generated)
-//   $rootDir/src/main/java                        -> loader sources
-//   $rootDir/src/main/resources                   -> loader resources
+// Compile patched Minecraft with the loader, then package the loader artifacts.
+// :mcpbase supplies generated Minecraft sources; src/main supplies loader code and resources.
 
 plugins {
     id 'java-library'
     id 'maven-publish'
     id 'top.outlands.forgedev' version '7.0.0-beta.59-cr4'
 }
-
 
 import net.minecraftforge.forgedev.tasks.Reobf
 import net.minecraftforge.srgutils.IMappingFile
@@ -46,9 +37,8 @@ base {
 
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(25)
-    // No 'withSourcesJar()': it would produce a second 'outlands-<version>-sources.jar' (patched Minecraft plus the
-    // loader) next to 'loaderSourcesJar' - same file name, different content - and userdev's 'sources' entry must be
-    // the loader only anyway. The patched sources ship as the 'dev-sources' classifier instead.
+    // loaderSourcesJar owns the sources classifier; dev-sources carries patched Minecraft.
+    // withSourcesJar() would create a conflicting artifact with different contents.
 }
 
 evaluationDependsOn(':mcpbase')
@@ -82,10 +72,7 @@ repositories {
         name = 'Outlands'
         url = 'https://maven.outlands.top/releases/'
     }
-    // Vanilla's own library host. 1.12.2 needs a few artifacts that exist nowhere else - java3d:vecmath is the one
-    // the loader compiles against (javax.vecmath in Forge's model API), lzma is carried over from vanilla's list.
-    // Without this repository they only resolve from a warm Gradle cache or through the cleanroom maven, which is
-    // a redirect to a third-party host - that is exactly how a local build succeeds where CI fails.
+    // Vanilla-only dependencies, including java3d:vecmath and lzma.
     maven {
         name = 'Mojang libraries'
         url = 'https://libraries.minecraft.net/'
@@ -122,29 +109,16 @@ apply from: 'installer.gradle'
 dependencies {
     // Minecraft libraries (including the vanilla assets jars) straight from the mcp config
     api project(path: ':mcpbase', configuration: 'mcpbaseLibraries')
-    // In a dev run the client reads its vanilla assets (textures, sounds, font/glyph_sizes.bin) off the classpath,
-    // the way ForgeGradle put the 'extra' jar on the runtime classpath. Only the run needs it, so it must not leak
-    // into the published jar.
+    // Development runs need vanilla resources from the extra jar on the classpath.
     runtimeOnly files(mcpBase.extra)
 }
 
-// The loader reports its own version at runtime (crash reports, mod metadata), so the class has
-// to be generated from the current project version instead of being a stale checked-out file.
+// Generate the runtime version used by crash reports and mod metadata.
 def genVersion = tasks.register('genVersion', top.outlands.gradle.helpers.tasks.GenVersionTask)
 
-// Patched Minecraft and the loader reference each other (the patches call FML, FML calls Minecraft), so they are
-// compiled together. They are separated again when packaging: the universal jar a launcher gets must not contain
-// Minecraft classes. At runtime FML turns the launcher's vanilla (notch named) jar into the patched, srg named
-// classes with the binary patches, and it does that for every class that reaches the class loader - including the
-// ones already sitting in this jar. A Minecraft class inside the loader jar is therefore fetched *first*, fed to
-// the patcher as if it were vanilla and rejected ('There is a binary discrepancy between the expected input class
-// ...'), which is what killed every class whose name is not obfuscated (ClientBrandRetriever and friends).
-//
-// The split is done by name: the loader's own tree is known, everything else in the compiled tree came from the
-// patched Minecraft sources. Names are the same in every name space here (the loader is never obfuscated).
-// ':mcpbase:applyPatches' writes this tree, so every task that reads it (compile, javadoc, dev-sources) needs a
-// dependency on it. Taking the task's own output provider - not the extension's directory, which is a plain path and
-// carries no producer - lets Gradle infer that instead of failing the build with an 'implicit dependency' problem.
+// Minecraft and the loader compile together, but the universal jar must contain only loader classes.
+// Bundled Minecraft classes would shadow vanilla input and fail binary patch validation.
+// Use the task output provider so Gradle tracks the dependency on applyPatches.
 def patchedMcSources = project(':mcpbase').tasks.named('applyPatches').flatMap { it.outputDirectory }
 def generatedVersionSources = genVersion.map { it.versionClass.parentFile.parentFile.parentFile.parentFile }
 
@@ -236,17 +210,12 @@ test {
 }
 
 
-// region Run configs -------------------------------------------------------
-// The loader boots through 'net.minecraftforge.boot.Main*', which forwards to FML with the env contract below.
-// Slime Launcher (ForgeDev) supplies the Minecraft classpath, assets and natives, so only the loader specific
-// environment variables have to be provided here.
+// region development runs
+// Foundation boots FML; ForgeDev's Slime Launcher supplies Minecraft libraries, assets and natives.
 def mcVersion = props.minecraft_version
 def mcpVersion = props.mcp_version
 
-// Foundation 1.1.0 boots the game on a thread of its own and keeps the process's first thread for SDL/Cocoa
-// (RetroFuturaBootstrap's MainStartOnFirstThread). On macOS that thread is only the AppKit thread when the JVM is
-// started with -XstartOnFirstThread, and Foundation refuses to start otherwise. The flag is a macOS-only JVM
-// option, so it must not be passed on the other platforms.
+// SDL/Cocoa needs the JVM's first thread on macOS; this option is invalid on other platforms.
 def macFirstThreadArgs = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('mac')
     ? ['-XstartOnFirstThread'] : []
 
@@ -261,13 +230,8 @@ def assetIndex = providers.provider {
         zip.close()
     }
 }
-// The dev client's '--assetsDir'. Textures, models and en_us.lang reach the client through the classpath (the mcp
-// config's 'extra' jar), but sounds, the other 105 languages and the realms icons are asset index objects that a
-// launcher fetches - a development run has none, so 'downloadAssets' fills the directory instead. It is a cache in
-// the Gradle user home ('clean' leaves it alone) and only the client run depends on it; '-PassetDirectory' points
-// the run at a launcher's own assets directory instead, and '-PassetsRepo' at a mirror.
-// Resolve against gradle's own user home: it moves to D:/gradle on this setup, and hardcoding
-// ~/.gradle points the launcher at a directory that does not exist.
+// Cache asset-index objects for client runs under the configured Gradle user home; clean preserves this cache.
+// -PassetDirectory uses an existing directory; -PassetsRepo selects an object mirror.
 def gradleUserHome = gradle.gradleUserHomeDir.absolutePath
 def assetDirectory = providers.gradleProperty('assetDirectory')
 def assetsDir = assetDirectory.map { project.file(it).absolutePath }.getOrElse(
@@ -328,30 +292,24 @@ forgedev.runs {
 }
 // endregion
 
-// the run configs need the plain text mappings file on disk, and the client the vanilla asset objects
+// Both runs need plain-text mappings; only the client downloads asset-index objects.
 tasks.configureEach {
     if (name == 'runOutlandsClient' || name == 'runOutlandsServer')
         dependsOn(mcpToSrg)
-    // a server has no resources, and an overridden directory is somebody else's to provide
+    // An explicit assets directory is supplied by the caller.
     if (name == 'runOutlandsClient' && !assetDirectory.isPresent())
         dependsOn(downloadAssets)
 }
 
 
-// region Reobf + binary patches --------------------------------------------
-// Legacy FML needs a 'reobfuscated' (MCP -> SRG) jar to diff against vanilla when generating binary patches. The
-// whole tree (patched Minecraft + loader) is renamed in one go; the two class sets are split again afterwards,
-// because they end up in different places:
-//   Minecraft  -> the dirty side of the binary patches
-//   loader     -> the universal jar a launcher gets
-//   both       -> the '-srg' jar, the 'classes' artifact ForgeDev 7 hands to mod projects
+// region binary patches
+// Rename the combined Minecraft and loader classes from MCP to SRG, then split them for packaging.
+// The universal jar contains the loader; the srg development artifact contains both class sets.
 def jarForReobf = tasks.register('jarForReobf', Jar) {
     archiveClassifier = 'reobf-input'
     destinationDirectory = layout.buildDirectory.dir('reobf-input')
     from sourceSets.main.output
-    // The vanilla resource tree that processResources copies in is for the dev classpath only. It must not end up in
-    // a published jar: the launcher's client jar already carries it, and it is not ours to distribute. Only
-    // 'assets/minecraft' is removed - 'assets/outlands', 'assets/forge', 'assets/fml', ... are the loader's own.
+    // Vanilla resources are for development runs only; keep the loader's own assets in the published jars.
     exclude 'assets/minecraft/**'
 }
 
@@ -362,37 +320,26 @@ def reobf = tasks.register('reobf', Reobf) {
     disableAbstractParams.set(false)
 }
 
-// The patcher diffs two jars that have to be in the *same* name space, so the dirty side is reobfuscated to notch
-// (the clean side is the launcher's vanilla jar) and '--srg' bakes the notch -> srg renames into the patch. Renaming
-// the dirty side to srg instead makes binarypatcher emit empty patches for every class (it cannot line the two up).
+// Binary patches compare vanilla and patched classes in notch names, then encode the notch -> SRG mapping.
 def reobfObf = tasks.register('reobfObf', Reobf) {
     input.from(jarForReobf)
-    // MCP -> notch. The mavenizer publishes it next to the metadata, but ForgeDev's MCPBase does not expose a
-    // provider for it yet (MCPData.map2obf exists, PatcherBase only forwards map2srg/obf2srg).
+    // MCP -> notch mapping, published beside the metadata but not exposed by MCPBase.
     mappings.set(layout.file(providers.provider {
         new File(mcpBase.metadata.get().parentFile, 'mappings.map2obf.tsrg.gz')
     }))
-    // The loader's own classes are not obfuscated, so they ship with srg names. The renamer resolves members through
-    // the class hierarchy, and without this it would rename a loader member that a game type declares into its notch
-    // name - a name nothing provides: the loader jar has the srg one, and the runtime deobfuscator has no mapping for
-    // a net/minecraftforge/... owner. The patches keep Minecraft's names in notch (coremods see those before
-    // deobfuscation, as they always have) and take loader names in srg, which is the space they are shipped in.
+    // Keep loader members in SRG names while Minecraft classes use notch names.
+    // Otherwise hierarchy-based renaming can produce loader member names unavailable at runtime.
     loaderSpace.set(layout.file(mcpBase.map2Srg))
     output.set(layout.buildDirectory.file('reobf-input/minecraft-obf.jar'))
     disableAbstractParams.set(false)
 }
 
-// Forge Renamer prints one line per entry it writes into the output jar ('  net/minecraft/...', ~6.5k per pass) plus
-// one per library class it cannot resolve while walking the class hierarchy. Two passes over the fused tree make
-// that ~13k console lines per build. The tool's exit code is the contract, and its full output is still written to
-// build/minecraftforge/forgedev/<task>/log.txt, so both passes only show it at INFO ('./gradlew build --info').
-// 'standardOutputLogLevel' is a @Console property: changing it never invalidates a task.
+// Keep per-entry renamer output at --info; full logs remain in build/minecraftforge/forgedev/<task>/log.txt.
 tasks.withType(Reobf).configureEach {
     standardOutputLogLevel.set(LogLevel.INFO)
 }
 
-// Only Minecraft: the patcher must not emit 'this class does not exist in the vanilla jar' entries for the loader's
-// own classes, FML would then try to patch them onto the copies that are already in the universal jar.
+// Restrict binary patch input to Minecraft; loader classes already ship in the universal jar.
 def obfMcJar = tasks.register('obfMcJar', Jar) {
     archiveClassifier = 'mc-obf'
     destinationDirectory = layout.buildDirectory.dir('reobf-input')
@@ -403,19 +350,13 @@ def obfMcJar = tasks.register('obfMcJar', Jar) {
     include { entry -> !isClassOf(loaderNames, entry.path) }
 }
 
-// The vanilla jars, notch named: FML feeds these exact bytes through the patcher, so every patch checksum has to be
-// taken from them (mcpBase.classes, the patched srg named classes, are the *output* of the patches, not the input).
+// Patch checksums must use the exact vanilla jar bytes that FML reads at runtime.
 def mcFiles = forgedev.minecraftFiles(props.minecraft_version)
 
-// Only classes the source patches touch need a binary patch. Every other Minecraft class still differs from vanilla
-// after a recompile (source file attribute, bytecode version, line numbers, injected annotations - and every constant
-// pool shift drags the instructions along), which used to bloat the pack with a patch per class. Forge and Cleanroom
-// both ship patches for the touched set only; the rest is renamed at runtime by the remapper.
+// Generate binary patches only for classes touched by source patches; the remapper handles the rest.
 def mcpPatches = project(':mcpbase').forgedev.patches
 
-// 1.12.2's server download is a fat jar (bundled libraries and all). Patches are only wanted for classes that the
-// loader also has - Minecraft's - because a 'this class does not exist in the target' entry for, say, Guava's
-// annotations would be applied to the real library at runtime.
+// The vanilla server jar bundles libraries. Filter those out so binary patches only target Minecraft classes.
 def vanillaCleanJar = { String side, Provider<File> vanilla ->
     tasks.register("vanillaClean${side.capitalize()}", Jar) {
         archiveClassifier = "vanilla-${side}".toString()
@@ -455,11 +396,8 @@ def vanillaCleanJar = { String side, Provider<File> vanilla ->
 
 // endregion
 
-// The universal jar: what a launcher puts on the classpath. Srg named loader classes, the resources (deobf data,
-// cleanmix info) and the binary patches that turn Minecraft into the patched classes at startup.
-// The plain 'jar' task is a debugging aid only: it holds the whole compiled tree (MCP named Minecraft classes
-// included) and the resource copy, so it must not be published or globbed by a release. It is written outside
-// 'libs/' for exactly that reason.
+// The universal jar contains SRG loader classes, loader resources and runtime binary patches.
+// Keep the full MCP jar under debug/ so release collection cannot mistake it for a distributable.
 tasks.named('jar') {
     archiveClassifier = 'mcp'
     destinationDirectory = layout.buildDirectory.dir('debug')
@@ -486,13 +424,8 @@ def universalJar = tasks.register('universalJar', Jar) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-// FML 1.12.2 reads a single '/binpatches.pack.lzma' resource: an LZMA compressed jar whose entries are
-// 'binpatch/client/<class>.binpatch' and 'binpatch/server/<class>.binpatch'. binarypatcher produces one pack per
-// side, so they get merged here.
-//
-// The entries are stored, not deflated: the jar is compressed as a whole afterwards (that is the LZMA stream FML
-// reads), and deflating first costs about half of the pack - the two sides share almost all of their content, which
-// only a compressor that sees the raw bytes can exploit. binarypatcher stores them for the same reason.
+// Merge client and server entries into FML's single binpatches.pack.lzma resource.
+// Store entries uncompressed inside the jar so the outer LZMA stream can compress shared content across sides.
 def binpatchesPack = tasks.register('binpatchesPack') {
     def clientPack = forgedev.binaryPatches('client').create.flatMap { it.output }
     def serverPack = forgedev.binaryPatches('server').create.flatMap { it.output }
@@ -534,25 +467,17 @@ def binpatchesPack = tasks.register('binpatchesPack') {
 }
 
 tasks.named('jar', Jar) {
-    // installed by the installer? no - the launcher JSON points at the universal jar, this one is only for local
-    // inspection of the pre-rename classes
+    // Include binary patches for local inspection of the pre-rename jar.
     from(binpatchesPack) {
         rename { 'binpatches.pack.lzma' }
     }
 }
 
 
-// region materialized dev environment --------------------------------------
-// ForgeDev 7 has no patch-application step for mod projects: its mcp artifact *is* the dev target (classes, srg
-// classes, sources, mappings, metadata, extra). 'outlands' can play that role because this build already materializes
-// the whole chain (mcp_config -> our patches -> loader), so no decompile happens on the consumer side.
-//
-// The userdev set is not enough for it: userdev's 'sources' is the patch target, i.e. the loader only, because its
-// consumer gets the Minecraft sources from mcp_config - ForgeDev has no such second source provider.
-//
-// What cannot be provided: 'sources.srg'. Renaming mcp -> srg on sources needs ast level analysis; the mavenizer's
-// RenameSourcesCli is srg -> mcp only, and it says the reverse is unsupported by the whole stack. The key is left out
-// instead of pointing it at the mcp named jar (which would be a lie that only shows up in SRG-level tools).
+// region development artifacts
+// ForgeDev consumes a complete development target: classes, SRG classes, sources, mappings, metadata and resources.
+// Userdev's loader-only sources are insufficient, so publish the patched Minecraft sources separately.
+// Omit sources.srg: the source renamer only supports SRG -> MCP, not the reverse.
 def devenvDir = layout.buildDirectory.dir('devenv')
 
 def devenvJson = tasks.register('devenvJson') {
@@ -579,8 +504,7 @@ def devenvJson = tasks.register('devenvJson') {
     }
 }
 
-// The Minecraft sources are the ones the loader is compiled against: patched, mcp named. They are shipped as a
-// separate classifier because '-sources' must stay loader-only (userdev applies patches to it).
+// Patched MCP Minecraft sources use dev-sources; the sources classifier stays loader-only for userdev.
 tasks.register('devSourcesJar', Jar) {
     archiveClassifier = 'dev-sources'
     from(patchedMcSources)
@@ -589,8 +513,7 @@ tasks.register('devSourcesJar', Jar) {
     }
 }
 
-// Everything ForgeDev reads besides the three big jars, in the shape it expects: the mcp config's own metadata/extra
-// and mappings are forwarded as-is (they describe the base this artifact was materialized from).
+// Forward the base MCP metadata, resources and mappings alongside the development jars.
 tasks.register('devenvZip', Zip) {
     archiveClassifier = 'devenv'
     archiveExtension = 'zip'
@@ -608,9 +531,7 @@ tasks.register('devenvZip', Zip) {
 // Classic userdev artifact (spec 2): config.json + joined.lzma + patches/ + ats/ + sources.
 // Consumed by ForgeGradle 3-5, the ModDevGradle legacy fork and the Unimined fork.
 // region loader sources -----------------------------------------------------
-// The userdev 'sources' artifact is what the consumer injects into its Minecraft tree, so it must contain the
-// loader's own sources only. The patched Minecraft sources are already produced by mcp_config; shipping them here
-// duplicates every minecraft class (and breaks patch application downstream).
+// Userdev injects loader sources into Minecraft sources provided by mcp_config; avoid duplicating Minecraft here.
 tasks.register('loaderSourcesJar', Jar) {
     archiveClassifier = 'sources'
     from("$rootDir/src/main/java") {
@@ -623,7 +544,7 @@ forgedev.userDev {
     base(mcpBase)
 
     binaryPatches {
-        // The final jar carries binpatches.pack.lzma and deobf data, the patches must not
+        // Use class-only input; exclude the universal jar's binary patches and mapping resources.
         clean.setFrom(providers.provider { mcpBase.classesRaw.get() })
         dirty.setFrom(obfMcJar.flatMap { it.archiveFile })
         srg.setFrom(mcpBase.obf2Srg)
@@ -678,10 +599,8 @@ tasks.register('outlandsInfo') {
     }
 }
 
-// region MMC/Prism pack -----------------------------------------------------
-// The launcher-facing distribution: mmc-pack.json + the per-component patch JSONs (forge slot carries the loader,
-// lwjgl3 slot carries our LWJGL build) + the loader jar for local (non-release) builds.
-// Registered before the publishing block below, which lists its output as a maven artifact.
+// region launcher pack
+// MultiMC/Prism components plus the loader jar for local builds; registered before publication consumes it.
 tasks.register('createMMCPack', CreateMMCPackTask) {
     group = 'build'
     description = 'Creates a MultiMC/Prism instance package for Outlands'
@@ -694,8 +613,7 @@ tasks.register('createMMCPack', CreateMMCPackTask) {
     loaderCoords = "${project.group}:${base.archivesName.get()}".toString()
     // Players take everything that is not central or Mojang's from the mirror that backs repo.cleanroommc.com.
     releaseBaseUrl = Util.MIRROR_MAVEN_URL
-    // 'release' is what CI passes when publishing. A plain build keeps the 'local' pack (it carries the loader jar,
-    // a release pack points at the maven URL instead), so the flag - not the version string - decides this.
+    // -Prelease selects Maven URLs; local packs bundle the loader jar.
     def releaseBuild = project.hasProperty('release')
     isRelease = releaseBuild
     outputZip = layout.buildDirectory.file("libs/${base.archivesName.get()}-${project.version}${releaseBuild ? '' : '-local'}.zip")
@@ -706,10 +624,8 @@ tasks.named('compileJava') { dependsOn ':mcpbase:applyPatches' }
 // endregion
 
 // region publishing ---------------------------------------------------------
-// top.outlands:outlands (universal), :userdev and :installer are the three artifacts consumers resolve.
-// Only the token is a secret: 'fg' is a shared publishing account, so it can stay visible in the logs (masking it
-// would turn every two-letter occurrence in the log into '***' anyway). Same flags locally and in CI:
-//   ./gradlew publish -PoutlandsToken=... [-PoutlandsUsername=fg] [-Prelease]
+// Publish top.outlands:outlands with its sources, userdev, installer, development and launcher-pack classifiers.
+// CI supplies the Maven token; the shared publishing username is fg.
 publishing {
     repositories {
         maven {
@@ -740,8 +656,7 @@ publishing {
             artifact(layout.buildDirectory.file("libs/${base.archivesName.get()}-${project.version}-srg.jar")) {
                 classifier = 'srg'; extension = 'jar'; builtBy tasks.named('reobf')
             }
-            // The launcher pack a player imports into Prism/MultiMC. Published here so a launcher download URL can
-            // point at maven instead of a GitHub release asset, which is the only place it used to exist.
+            // Publish the importable MultiMC/Prism pack with the mmc classifier.
             artifact(tasks.named('createMMCPack')) {
                 classifier = 'mmc'; extension = 'zip'
             }
@@ -751,15 +666,11 @@ publishing {
 // endregion
 
 // region checks -------------------------------------------------------------
-// The FG6 build shipped its own copies of these (buildSrc CheckPatches/CheckAccessTransformers/CheckSAS), but
-// ForgeDev already provides them: Checks registers checkPatches/checkAts/checkSas/checkExecs lazily and wires them
-// into the standard 'check' lifecycle task. They only need to be opted in.
+// ForgeDev registers patch and exception checks and attaches them to the standard check lifecycle.
 def checks = forgedev.checks
 checks.base(project(':mcpbase').forgedev.mcpBase)
-// ats()/sas() are parked: both need extractInheritance, and ForgeDev's Checks.setBase wires its input from
-// ':mcpbase:mcpbaseDependencies', which Gradle 9 refuses to resolve from an ':outlands' task action
-// ("resolution of the configuration ... was attempted without an exclusive lock"). Re-enable once the fork
-// resolves that configuration eagerly (e.g. by passing a FileCollection captured at configuration time).
+// AT/SAS checks require extractInheritance, whose cross-project dependency resolution fails under Gradle 9.
+// Enable these after ForgeDev resolves the dependency configuration before task execution.
 // checks.ats {}
 // checks.sas {}
 checks.patches { it.patchDir.set(rootProject.layout.projectDirectory.dir('patches/minecraft')) }
@@ -767,11 +678,8 @@ checks.execs {}
 // endregion
 
 // region shipped artifact guard ---------------------------------------------
-// A shipped artifact must not carry Mojang's classes, sources or resources: a launcher installs the vanilla client
-// jar next to the loader, the loader only patches it at runtime, and redistributing the game is not ours to do. The
-// 'dev-sources', 'srg' and 'devenv' classifiers contain Minecraft material on purpose (they are the ForgeDev dev
-// target, the same shape as Forge's own mcp_config), so they are not part of this check - everything a player or a
-// launcher downloads is.
+// Player-facing artifacts must exclude vanilla Minecraft classes, sources and resources.
+// Development classifiers intentionally contain Minecraft material and are excluded from this check.
 tasks.register('verifyArtifacts') {
     group = 'verification'
     description = 'Fails when a shipped artifact contains Minecraft classes, sources or resources'
@@ -800,8 +708,7 @@ tasks.register('verifyArtifacts') {
                 "  ${name}: ${hits.size()} entr${hits.size() == 1 ? 'y' : 'ies'}, e.g. ${hits.take(3).join(', ')}"
             }.join('\n'))
 
-        // The other half of the same mistake: an exclude that is too broad removes the loader's own resources
-        // (banner, icon, forge/fml translations) and nobody notices until the mod list shows a blank tile.
+        // Also require the loader's own assets so an overly broad exclusion cannot strip them.
         def required = ['assets/outlands/banner.png', 'assets/outlands/icon.png', 'assets/forge/lang/en_us.lang']
         def universal = universalJar.get().archiveFile.get().asFile
         def missing = new java.util.zip.ZipFile(universal).withCloseable { zip ->

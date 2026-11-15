@@ -1,8 +1,7 @@
 # Outlands Feature Proposal Guidelines
 
-1. Be as descriptive as possible!
-2. Keep the content sensible.
-3. Keep the profanities to a minimal level.
-4. Don't spam proposals that are still in draft stage, the triage will take a look at it in due time!
-5. Or, just don't spam at all!
-6. Feel free to ping a triage member whenever the proposal has moved to a new stage, but only once!
+1. Describe the proposed feature, its purpose, and how it would work.
+2. Keep proposals relevant and constructive.
+3. Keep profanity to a minimum.
+4. Give the triage team time to review draft proposals. Do not post duplicates or spam.
+5. You may ping a triage member once when your proposal moves to a new stage.

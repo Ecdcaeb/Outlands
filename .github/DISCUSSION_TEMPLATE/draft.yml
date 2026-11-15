@@ -1,56 +1,56 @@
-title: Proposal Name
+title: Feature proposal title
 body:
   - type: input
     id: summary
     attributes:
       label: Summary
-      placeholder: Present your proposal with a sentence or two...
+      placeholder: Summarize the proposed feature in one or two sentences.
     validations:
       required: true
   - type: textarea
     id: goal
     attributes:
       label: Goals
-      placeholder: What are the goals for this proposal?
+      placeholder: What should this proposal achieve? Describe the intended outcomes.
     validations:
       required: true
   - type: textarea
     id: non-goals
     attributes:
-      label: Non Goals
-      placeholder: What are not the goals for this proposal? This can help eliminating feature creeping.
+      label: Non-goals
+      placeholder: What is outside the scope of this proposal? Write None if there are no specific exclusions.
     validations:
       required: true
   - type: textarea
     id: motivation
     attributes:
       label: Motivation
-      placeholder: What made you want to propose this idea?
+      placeholder: What problem does this solve, and who would benefit?
     validations:
       required: true
   - type: textarea
     id: description
     attributes:
       label: Description
-      placeholder: Write everything down to the tiniest detail!
+      placeholder: Describe how the feature would work, with examples of its behavior and any relevant limitations or tradeoffs.
     validations:
       required: true
   - type: textarea
     id: dependencies
     attributes:
       label: Dependencies
-      placeholder: Does this proposal depend on any prior proposals and/or any external projects?
+      placeholder: List any required proposals or external projects, with links where possible. Write None if there are no dependencies.
   - type: textarea
     id: references
     attributes:
       label: References
-      placeholder: Note down anything you referenced, whether that be links, papers etc.
+      placeholder: Link to related discussions, documentation, papers, or other sources.
   - type: checkboxes
     id: acknowledge
     attributes:
       label: Guidelines
       description: |
-          View the guidelines here: [Outlands Feature Proposal Guidelines](../blob/main/CFP_GUIDELINES.md)
+          Read the [Outlands Feature Proposal Guidelines](https://github.com/Project-Outlands/Outlands/blob/main/CFP_GUIDELINES.md) before submitting.
       options:
-        - label: I have and will continue to adhere to the guidelines
+        - label: I have read the guidelines and will follow them throughout this proposal.
           required: true

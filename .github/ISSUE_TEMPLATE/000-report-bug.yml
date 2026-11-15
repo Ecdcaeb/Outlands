@@ -3,26 +3,26 @@ description: "Did something not work as expected?"
 body:
   - type: markdown
     attributes:
-      value: "A bug/crash report with sufficient information and logs to reproduce and track down."
+      value: "Describe the bug, explain how to reproduce it, and attach the logs needed to investigate."
   - type: input
     id: discord
     attributes:
       label: Your Discord Username
-      description: Leave empty if you don't have one, but this will make it harder to contact you if we need additional info.
-      placeholder: "Example: Fake#1234"
+      description: Optional. Provide your Discord username if you would like us to contact you there for more information.
+      placeholder: "Example: username"
   - type: input
     id: version
     attributes:
       label: Outlands Version
       description: "What version of Outlands are you using? It is printed at the top of `logs/latest.log`."
-      placeholder: "Example: 0.5.4-alpha"
+      placeholder: "Example: 2026.11.14 or 2026.11.14-2"
     validations:
       required: true
   - type: dropdown
     id: java
     attributes:
       label: Java Version
-      description: What Java version are you using? It's worth mentioning that if you play on Java9+ you should try update to latest minor release (e.g. prefer Java 17.0.6 over 17.0.2) of that version.
+      description: Select the Java version used to run the game. For Java 9 or newer, try the latest patch release of that version. If you select Other, include the full version in your report.
       options:
         - Java 8
         - Java 21
@@ -39,7 +39,7 @@ body:
     id: graphics
     attributes:
       label: Graphics Card Vendor
-      description: What graphics card vendor are you using?
+      description: Select your graphics vendor. If you select Other, name it in your report.
       options:
         - Other (Please Specify)
         - NVidia
@@ -53,37 +53,43 @@ body:
     id: report
     attributes:
       label: Bug Report
-      description: "Relevant information, as well as relevant logs attached such as `logs/latest.log` and `logs/debug.log`."
-      placeholder: "Example: https://mclo.gs/ OR submit the file to github by dragging it to this textbox."
+      description: "Include numbered steps to reproduce the bug, what you expected to happen, and what actually happened. Attach `logs/latest.log` and `logs/debug.log` if available, plus a crash report if one was generated."
+      placeholder: |
+        Steps to reproduce:
+        1.
+
+        Expected behavior:
+
+        Actual behavior:
+
+        Logs and crash report: drag files into this box or paste links from https://mclo.gs/.
     validations:
       required: true
   - type: textarea
     id: modlist
     attributes:
       label: Mod List
-      description: "List of mods, ideally a minimal reproducible set (can be retrieved from latest.log)."
-      placeholder: "List of mods goes here"
+      description: "List the mods and their versions, ideally the smallest set that reproduces the issue. You can find the mod list in `logs/latest.log`."
+      placeholder: "List the mods and versions, or write None if no additional mods are installed."
     validations:
       required: true
   - type: checkboxes
     id: final
     attributes:
       label: Final Checklist
-      description: Certify that you read things
+      description: Confirm each item before submitting. For conditional prerequisites, confirm that you tried them or that they do not apply to your setup.
       options:
-        - label: "I have searched the issues and haven't found a similar issue."
+        - label: "I have searched the existing issues and found no report of the same problem."
           required: true
-        - label: "I have read the readme and know that what is action build."
+        - label: "I have read the reporting instructions above and included the requested details."
           required: true
-        - label: "I have installed [Fugue](https://www.curseforge.com/minecraft/mc-mods/fugue) and it didn't fix my issue."
+        - label: "I have tried [Fugue](https://www.curseforge.com/minecraft/mc-mods/fugue) and the issue persists, or it does not apply to my setup."
           required: true
-        - label: "I have installed [Scalar Legacy](https://www.curseforge.com/minecraft/mc-mods/scalar-legacy) and it didn't fix my issue."
+        - label: "I have tried [Scalar Legacy](https://www.curseforge.com/minecraft/mc-mods/scalar-legacy) and the issue persists, or it does not apply to my setup."
           required: true
-        - label: "I have switched my Forgelin and LibrarianLib to continuous versions(check readme for more detail)."
+        - label: "If I use Forgelin or LibrarianLib, I have switched them to their continuous builds; otherwise, this does not apply to my setup."
           required: true
-        - label: "I am running a test build from Outlands Github Actions.  (Or, if I've compiled it myself I plan to fix the issue)"
+        - label: "I am using a test build downloaded from [Outlands GitHub Actions](https://github.com/Project-Outlands/Outlands/actions), or I compiled Outlands myself and plan to fix the issue."
           required: true
-        - label: |
-            I did not use PCL/PCLCE or other unsupported launchers.
-            我没有使用 PCL/PCLCE 等其他未被支持的启动器。
+        - label: "I am not using PCL, PCLCE, or another unsupported launcher."
           required: true

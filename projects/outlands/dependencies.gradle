@@ -3,9 +3,7 @@ def lwjglLibraries = project.lwjglLibraries
 def lwjglArch = project.lwjglArch
 
 configurations {
-    // 1.12.2 ships modules that were later renamed instead of upgraded, so Gradle cannot arbitrate them and both
-    // copies reach the classpath. Their replacements are on the 'installer' list; see installer.gradle's
-    // verifyNoStaleLibraries.
+    // Exclude vanilla modules replaced by the installer library set; see verifyNoStaleLibraries in installer.gradle.
     configureEach {
         exclude group: 'org.lwjgl.lwjgl'
         exclude group: 'com.ibm.icu', module: 'icu4j-core-mojang'
@@ -18,7 +16,7 @@ configurations {
         exclude group: 'net.java.jutils', module: 'jutils'
     }
 
-    // Don't pull all libraries, if we're missing something, add it to the installer list so the installer knows to download it.
+    // List launcher libraries explicitly so the installer can download every dependency.
     installer {
         transitive = false
     }
@@ -28,9 +26,7 @@ configurations {
         transitive = false
     }
 
-    // Forge's installer program, the one the installer jar wraps around its metadata: a Swing GUI plus the
-    // headless actions (--installClient/--installServer/--extract/--makeOffline). It is not a launcher library and
-    // must not reach version.json, so it gets its own configuration rather than riding on 'installer'.
+    // The standalone installer provides the GUI and headless install actions; keep it off the launcher classpath.
     installerApp {
         transitive = false
     }
@@ -38,7 +34,7 @@ configurations {
     testCompile.extendsFrom(lwjglNatives)
 }
 
-// Plain LWJGL3 API jars (no classifier) for the table check and the upcoming compile-time API
+// Unclassified LWJGL3 API jars used to validate the rewrite table.
 configurations {
     lwjgl3Api {
         transitive = false
@@ -66,9 +62,7 @@ dependencies {
         }
     }
 
-    // Config formats. These are loader-level libraries, so they belong on the launcher classpath rather than inside
-    // any jar: config files are read before mods are constructed. The versions are inline: a property in
-    // gradle.properties only earns its keep when several dependencies are upgraded together.
+    // Configuration parsers must be available on the launcher classpath before mods are constructed.
     installer 'org.tomlj:tomlj:2.2.0'
     installer 'com.typesafe:config:1.4.9'
     installer 'org.snakeyaml:snakeyaml-engine:2.10'
@@ -79,16 +73,16 @@ dependencies {
     installer "org.ow2.asm:asm-tree:$props.asm_version"
     installer "org.ow2.asm:asm-util:$props.asm_version"
     installer "org.ow2.asm:asm-analysis:$props.asm_version"
-    // Added back deprecated features for mods to load up properly, hosted on outlands
+    // Deprecated ASM APIs needed by older mods; hosted on Outlands Maven.
     installer "org.ow2.asm:asm-deprecated:$props.asm_deprecated"
 
-    // Hacks
+    // Runtime access and bytecode support
     installer 'top.outlands:foundation:1.1.1'
     installer 'net.lenni0451:Reflect:1.6.4'
     installer 'net.lenni0451.commons:unchecked:1.9.2'
     installer 'org.javassist:javassist:3.33.0-GA'
 
-    // Regular deps
+    // Core libraries
     installer 'com.ibm.icu:icu4j:78.3'
     installer 'org.jline:jline:4.4.8'
     installer 'org.jline:jline-native:4.4.8'
@@ -108,22 +102,15 @@ dependencies {
 
     installer 'it.unimi.dsi:fastutil:8.5.19'
 
-    // Math types for the render interfaces. JOML was dropped with the kirino submodule (e02c508a), but the
-    // render seams need real matrix/vector types rather than float[], so it comes back as a loader dependency.
+    // Matrix and vector types for the rendering interfaces.
     installer 'org.joml:joml:1.10.9'
 
     installer 'com.google.guava:guava:33.7.2-jre'
     installer 'com.google.guava:failureaccess:1.0.3'
     installer 'com.google.code.gson:gson:2.14.0'
 
-    // The installer program itself (see installer.gradle): Forge's installer is a standalone, published artifact -
-    // the same convention ForgeGradle and Cleanroom use. 'fatjar' carries its own dependencies and the manifest with
-    // Main-Class: net.minecraftforge.installer.SimpleInstaller. Bump the version deliberately: it decides what the
-    // GUI looks like, not what gets installed (that is all in install_profile.json/version.json).
-    //
-    // Upstream, not a fork: the window title and its dialogs say 'Forge Installer', because that string is compiled
-    // into the artifact. Accepted on purpose - it is the same program every 1.12.2 player already ran, and forking
-    // it (what Cleanroom did with 'com.cleanroommc:installer:...:shrunk') is only worth it for the branding.
+    // Forge's standalone installer includes its dependencies and SimpleInstaller entry point.
+    // Its version controls the GUI; install_profile.json and version.json control what gets installed.
     installerApp 'net.minecraftforge:installer:2.2.17:fatjar'
 
     installer 'org.apache.commons:commons-lang3:3.21.0'
@@ -132,9 +119,9 @@ dependencies {
     installer 'commons-io:commons-io:2.22.0'
     installer 'commons-logging:commons-logging:1.4.0'
     installer 'org.apache.maven:maven-artifact:3.9.16'
-    installer 'org.apache.commons:commons-text:1.15.0' // Some old classes in lang3 moved to here, wtf
-    
-    // xz in common-compress need this to work
+    installer 'org.apache.commons:commons-text:1.15.0'
+
+    // LZMA/XZ compression support for Commons Compress.
     installer 'org.tukaani:xz:1.12'
 
     installer 'com.google.code.findbugs:jsr305:3.0.2'
@@ -177,7 +164,7 @@ dependencies {
     installer 'org.apache.logging.log4j:log4j-slf4j2-impl:2.26.0'
     installer 'org.slf4j:slf4j-api:2.0.18'
 
-    // Scripts
+    // XML, CORBA and scripting support
     installer 'org.glassfish.jaxb:jaxb-runtime:4.0.9'
     installer 'org.glassfish.jaxb:jaxb-core:4.0.9'
     installer 'com.sun.istack:istack-commons-runtime:4.2.0'

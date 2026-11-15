@@ -1,8 +1,8 @@
 # Changelog
-All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Release history for Outlands. Versions use [Calendar Versioning](https://calver.org/): `YYYY.MM.DD` in UTC, with `-2`, `-3`, and so on for additional releases on the same day.
+
+Release notes are generated from commits with [git-cliff](https://git-cliff.org) and [cliff.toml](cliff.toml).
 
 ## [2026.11.14] - 2026-11-14
 

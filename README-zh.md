@@ -1,174 +1,159 @@
 # Outlands
 
-1.12.2 的模组加载器。构建已从旧的 ForgeGradle 方案搬进本仓库自足实现：MCP 流程（反编译、访问转换、cleanup、
-重命名）、补丁集、loader 源码、二进制补丁、安装器与启动器整合包，全部由本仓库产出。
+Outlands 是 Minecraft 1.12.2 的模组加载器。本仓库包含加载器源码、Minecraft 补丁，以及生成安装器、开发产物和启动器实例包的构建工具。
 
-英文版见 `README.md`。
+[English](README.md) · [下载与使用](#下载与使用) · [构建与开发](#构建与开发) · [维护与发布](#维护与发布)
 
-## 环境要求
+## 下载与使用
 
-* JDK 25（`java -version`）
-* 没有别的了：Gradle 由 wrapper 自行下载，反编译/打补丁的工具链从 maven 取
+从 [GitHub Releases](https://github.com/Project-Outlands/Outlands/releases) 下载所需版本，按用途选择文件：
 
-## 构建
-
-```
-./gradlew setup      # 反编译 + 打补丁（首次需要，之后改了补丁也需要）
-./gradlew build      # 编译 loader、重混淆、生成二进制补丁、打包
-```
-
-产物在 `projects/outlands/build/libs/`：
-
-| 文件 | 说明 |
+| 发布文件 | 用途 |
 |---|---|
-| `outlands-<版本>.jar` | loader（universal）jar |
-| `outlands-<版本>-installer.jar` | Forge 的安装器程序（GUI + `--installClient`/`--installServer`），内含我们的 `install_profile.json`、`version.json` 与 universal jar |
-| `outlands-<版本>-sources.jar` | loader 源码（userdev 消费者注入的就是它） |
-| `outlands-<版本>-userdev.jar` | 供模组开发环境使用的 userdev 产物 |
-| `outlands-<版本>-srg.jar` | 重混淆后的 class（userdev 工具链使用） |
-| `outlands-<版本>.zip` / `outlands-<版本>-local.zip` | MultiMC/Prism 实例包 |
+| `outlands-<version>.zip` | 导入 MultiMC/Prism 作为实例；启动器会下载已发布的加载器及其依赖。 |
+| `outlands-<version>-installer.jar` | 运行图形安装器，或使用 `--installClient` / `--installServer`。 |
+| `outlands-<version>.jar` | 通用加载器 JAR，供需要直接集成加载器的工具使用。 |
 
-`-Prelease` 会让启动器整合包指向已发布的 maven 地址，而不是本地 jar。
+测试构建可从[构建工作流](https://github.com/Project-Outlands/Outlands/actions/workflows/BuildTest.yml)的产物中下载。
 
-### 版本号
+模组开发使用的 Maven 坐标为 `top.outlands:outlands:<version>`，仓库地址为 [Outlands Maven](https://maven.outlands.top/releases/)。可用分类器包括 `userdev`、`installer`、`sources`、`srg`、`dev-sources`、`devenv` 和 `mmc`。其中 `mmc` 产物名为 `outlands-<version>-mmc.zip`，与 GitHub 发布附件 `outlands-<version>.zip` 是同一个实例包。
 
-CalVer：`YYYY.MM.DD`，用 UTC，**不带任何其它信息**——没有 commit 距离、没有 dirty 标记、没有 CI 运行号。
-因此同一天构建多次会得到相同的文件名，互相覆盖。
+版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
-只有**发布**才带序号：当天第一次是 `2026.10.23`，之后是 `2026.10.23-2`、`2026.10.23-3`……后缀只在发布时决定，
-本地构建永远没有。想复现某个已发布版本，用 `-PcalverDate=2026.10.23 -PcalverSuffix=-2`。
+问题反馈请使用 [Issues](https://github.com/Project-Outlands/Outlands/issues)；功能提案请先阅读[提案指南](CFP_GUIDELINES.md)，再提交到 [Discussions](https://github.com/Project-Outlands/Outlands/discussions)。
 
-## 开发运行
+## 构建与开发
 
+### 环境与构建
+
+使用 JDK 25 运行 Gradle 和编译，并为 ForgeDev 工具准备 JDK 8；CI 也会安装这两个版本。Gradle wrapper 会下载 Gradle，构建依赖和工具从 Maven 仓库获取。
+
+在仓库根目录执行命令。Windows 下请将 `./gradlew` 换成 `gradlew.bat`。
+
+```sh
+./gradlew setup      # 准备 Minecraft 基线源码和应用补丁后的源码
+./gradlew build      # 编译、生成二进制补丁并打包
 ```
+
+首次检出和修改补丁后运行 `setup`。构建产物位于 `projects/outlands/build/libs/`：
+
+| 文件 | 内容 |
+|---|---|
+| `outlands-<version>.jar` | 通用加载器 |
+| `outlands-<version>-installer.jar` | 包含加载器和安装配置的安装器 |
+| `outlands-<version>-sources.jar` | 加载器源码 |
+| `outlands-<version>-userdev.jar` | 模组开发配置与补丁 |
+| `outlands-<version>-srg.jar` | 重混淆后的类 |
+| `outlands-<version>-dev-sources.jar` | 加载器与应用补丁后的 Minecraft 源码 |
+| `outlands-<version>-devenv.zip` | 开发用映射与元数据 |
+| `outlands-<version>-local.zip` | 包含加载器 JAR 的本地实例包 |
+
+`./gradlew build -Prelease` 会生成 `outlands-<version>.zip`，替代本地实例包。它引用已发布的加载器下载地址，因此使用前需要确保对应版本已在远端发布。这个参数本身不会上传任何产物。
+
+版本号采用 UTC 日期的 CalVer（`YYYY.MM.DD`）。同一天的本地构建使用相同文件名；当天的发布依次使用 `YYYY.MM.DD`、`YYYY.MM.DD-2`、`YYYY.MM.DD-3` 等版本号。要在本地复现某个发布版本号：
+
+```sh
+./gradlew build -PcalverDate=2026.10.23 -PcalverSuffix=-2
+```
+
+### 开发运行
+
+```sh
 ./gradlew runOutlandsClient
 ./gradlew runOutlandsServer
 ```
 
-工作目录都是 `projects/outlands/run/`。classpath 就是项目的 runtime classpath（mcp config 的库 + 为客户端 jar 内资源的
-`extra` jar），FML 通过 `net.minecraftforge.boot.MainClient` 直接启动，中间没有 launcher，所以没人会去下载原版资源。
-`runOutlandsClient` 会先下好：资源索引和它的 1305 个 objects（音效、除 `en_us` 外的 105 种语言、realms 图标）放进
-`$GRADLE_USER_HOME/caches/outlands/assets`。它是缓存：只下一次，之后复用，`clean` 不会删，且只有客户端运行依赖它。
+两者的工作目录均为 `projects/outlands/run/`。客户端任务会将 Minecraft 资源下载到 `<Gradle 用户目录>/caches/outlands/assets`；后续运行复用缓存，`clean` 不会删除它。
 
-| 属性 | 含义 |
+| 属性 | 用途 |
 |---|---|
-| `-PassetDirectory=<dir>` | 直接使用已有的资源目录（比如某个启动器的），不下载 |
-| `-PassetsRepo=<url>` | 对象主机，默认 `https://resources.download.minecraft.net/` |
-| `-PassetsConnections=<n>` | 并行下载数，默认 8 |
+| `-PassetDirectory=<dir>` | 使用已有资源目录，跳过自动下载 |
+| `-PassetsRepo=<url>` | 资源对象下载地址，默认为 `https://resources.download.minecraft.net/` |
+| `-PassetsConnections=<n>` | 资源并行下载数，默认为 8 |
+| `-PnativesDirectory=<dir>` | 指定本地库目录 |
 
-## 仓库结构
+### 仓库结构
 
 | 路径 | 内容 |
 |---|---|
-| `projects/mcpbase` | MCP 层：反编译、访问转换、mcpcleanup、补丁应用。产出 `projects/mcpbase/minecraft` 与 `.../patched` 两棵源码树 |
-| `projects/outlands` | loader 源码（与打好补丁的 Minecraft 一起编译）、重混淆、二进制补丁、打包、userdev、安装器、启动器整合包 |
-| `patches/minecraft` | 修改后的 Minecraft 源码，以可 git apply 的补丁形式维护 |
-| `templates` | `LoaderVersion.java`，构建时填入当前版本 |
-| `buildSrc` | 构建插件与任务（`top.outlands.gradle.*`） |
-| `legacy/fg6` | 旧的 ForgeGradle 6 构建脚本，仅作参考 |
+| [src](src) | 加载器源码与测试 |
+| [projects/mcpbase](projects/mcpbase) | Minecraft 源码准备与补丁任务 |
+| [projects/outlands](projects/outlands) | 加载器构建、开发运行与打包 |
+| [patches/minecraft](patches/minecraft) | Minecraft 源码补丁 |
+| [buildSrc](buildSrc) | Gradle 插件与任务 |
+| [templates](templates) | 加载器版本信息模板 |
+| [mmcpack-template](mmcpack-template) | 启动器实例模板 |
+| [tools/lwjgl2diff](tools/lwjgl2diff) | LWJGL 对比工具 |
 
-给模组开发者的坐标：`top.outlands:outlands:<版本>`（另有 `userdev`、`installer`、`sources`、`srg`、
-`dev-sources`、`devenv`、`mmc` 分类器），来自 `https://maven.outlands.top/releases`。
-其中 `mmc` 分类器就是启动器整合包（`outlands-<版本>-mmc.zip`），与 release 里附带的 zip 是同一个文件。
+## 维护与发布
 
-## 维护补丁
+### Minecraft 补丁
 
-Minecraft 源码通过 `patches/minecraft/**.java.patch` 修改。它们是标准的 unified diff，带 `before/` + `after/`
-前缀和完整 hunk 头，`git apply -p2`、`patch -p2` 和 IDE 都能直接读。
+Minecraft 改动保存在 `patches/minecraft/**/*.java.patch` 中。这些文件是带有 `before/` 和 `after/` 前缀的 unified diff。在提取出的基线源码根目录中，可使用 `git apply -p1` 或 `patch -p1` 应用补丁，也可通过 IDE 的差异工具查看。
 
-* `./gradlew :outlands:checkPatches` 校验所有补丁仍然可用
-* `:mcpbase:makePatches` 从 `projects/mcpbase/patched` 重新生成补丁集
+`setup` 会生成两棵源码树：`projects/mcpbase/minecraft` 是未修改的基线，`projects/mcpbase/patched` 已应用补丁。修改 `patched` 中的源码后，重新生成并检查补丁集：
 
-未打补丁的基线与打完补丁的树并排放，都是 MCP 名、都是生成物（gitignore）、都由 `:mcpbase:clean` 删除：
+```sh
+./gradlew :mcpbase:makePatches
+./gradlew :outlands:checkPatches
+```
 
-| 路径 | 内容 |
+使用 `:mcpbase:extractBase` 或 `:mcpbase:applyPatches` 可重新生成对应的源码树。两棵树均被 Git 忽略，并由 `:mcpbase:clean` 删除；清理前请先将源码改动保存到补丁文件。可在 IDE 中比较两棵树，或执行：
+
+```sh
+diff -ru projects/mcpbase/minecraft projects/mcpbase/patched
+```
+
+<details>
+<summary>发布准备、命令与故障恢复</summary>
+
+### 发布准备
+
+[发布工作流](.github/workflows/Release.yml) 负责构建和上传。`./gradlew release` 检查本地仓库、计算版本号、触发 CI 并等待结果，不会上传本地产物。执行时必须位于 `main` 分支，工作区干净，且当前提交与 `origin/main` 一致。
+
+创建一个仅能访问 `Project-Outlands/Outlands` 的 GitHub 细粒度个人访问令牌：
+
+- `Actions: Read and write`：用于触发和监控工作流。
+- `Contents: Read`：用于让本地任务在发布后确认 GitHub release，包括私有仓库中的 release。缺少此权限时 CI 仍可完成，但本地可能无法确认发布结果。
+
+将令牌放在仓库外的 `~/.gradle/gradle.properties` 中（Windows：`%USERPROFILE%\.gradle\gradle.properties`）：
+
+```properties
+releaseToken=REPLACE_WITH_YOUR_TOKEN
+```
+
+也可以通过环境或密钥管理工具提供 `OUTLANDS_RELEASE_TOKEN`，或传入 `-PreleaseToken=<token>`。避免在命令中直接填写真实令牌：命令行参数和环境变量赋值中的明文值都可能进入 shell 历史。凭据文件应仅供自己访问，不要加入版本控制。
+
+CI 需要 `OUTLANDS_MAVEN_TOKEN` secret 来发布 Maven 产物，发布用户名为 `fg`。
+
+### 发布命令
+
+```sh
+./gradlew release                               # 检查、触发 CI 并等待
+./gradlew release -PdryRun                      # 检查并打印发布计划，不触发 CI
+./gradlew release -PnoWait                      # 触发后打印工作流地址并返回
+./gradlew release -PreleaseVersion=2026.10.23-2  # 恢复指定版本的发布
+./gradlew releaseVersion                        # 打印下一个发布版本号
+```
+
+可选属性：`-PgitRemote=<name|path>` 指定远端，默认为 `origin`；`-PreleaseTimeout=<minutes>` 修改等待超时时间，默认为 20 分钟。
+
+CI 会检查指定提交和版本号，完成构建并上传 Maven，然后创建 tag 和 GitHub release。本地构建优先解析 `mavenLocal()`，CI 则没有本地产物。发布前需将所依赖的 `top.outlands` 工具发布到 Outlands Maven；在本地复现 CI 的依赖解析时，可用 init script 移除 `mavenLocal()`。
+
+发布说明与 [CHANGELOG.md](CHANGELOG.md) 由 [git-cliff](https://git-cliff.org) 按 [cliff.toml](cliff.toml) 生成。复现说明时，显式指定上一个 tag 和目标版本：
+
+```sh
+git cliff 2026.10.23..HEAD --tag 2026.10.23-2
+```
+
+### 发布恢复
+
+| 失败位置 | 处理方式 |
 |---|---|
-| `projects/mcpbase/minecraft` | 基线，未打补丁（`:mcpbase:extractBase`） |
-| `projects/mcpbase/patched` | 已应用 `patches/minecraft`（`:mcpbase:applyPatches`） |
+| 上传前的构建或检查 | 修复原因后重新运行 `./gradlew release`；此时尚未创建 tag。 |
+| Maven 上传 | 修复原因后重试；若该版本已部分上传，需先从 Maven 删除该版本，CI 会拒绝部分发布的状态。 |
+| 上传后的 tag、GitHub release 或更新日志步骤 | 运行 `./gradlew release -PreleaseVersion=<version>`；CI 会跳过已完整上传的 Maven 产物，并复用已有 tag。 |
 
-所以补丁可以直接当 diff 读：`diff -ru projects/mcpbase/minecraft projects/mcpbase/patched`，或者在 IDE 里两目录对比。
-`:outlands` 编译的就是 `patched` 那棵。
+tag 不会自动回退，恢复发布时请保留已有 tag。推送 CalVer tag 也会触发工作流，但会绕过本地版本选择，仅在确认版本号尚未使用时采用此方式。
 
-基线树在 `:mcpbase` 里注册成了一个 source set，供 IDE 索引（`compileMinecraftJava` 被禁用——不参与编译，patched 树
-已经由 `:outlands` 编译）；也正是这个 source set 让基线的 import 有 classpath 可以解析。
-
-## 发布（维护者）
-
-> 本地构建会优先用 `mavenLocal()`，CI 不会。凡是从 `top.outlands` fork 取的东西（ForgeDev 插件、mavenizer……）
-> 都必须发布到 `maven.outlands.top`，否则会出现“本地能构建、发布构建失败”。想本地复现 CI，可以用 `--init-script`
-> 把 `mavenLocal` 从所有仓库里去掉。
-
-发布由 CI（`Release.yml`）构建并上传，**任何情况下都不从本地上传**。`./gradlew release` 只是“按下按钮”：它不会改动
-仓库，也不会发布本地构建。
-
-### 一次性准备
-
-在**你自己的** GitHub 账号上创建一个 fine-grained personal access token：
-
-* Repository access：只勾 `Project-Outlands/Outlands`
-* Permissions：`Actions: Read and write`（别的不需要）
-
-把它放在仓库之外：
-
-```
-echo 'releaseToken=github_pat_...' >> ~/.gradle/gradle.properties
-# Windows: %USERPROFILE%\.gradle\gradle.properties
-```
-
-也可以临时用 `-PreleaseToken=...` 或环境变量 `OUTLANDS_RELEASE_TOKEN`（环境变量更容易进 shell 历史，推荐用 properties）。
-
-### 命令
-
-```
-./gradlew release                                 # 校验 → 算版本 → 派发 CI → 等结果
-./gradlew release -PdryRun                        # 只校验并打印将要发布的版本
-./gradlew release -PnoWait                        # 派发后立刻返回（打印 run 地址）
-./gradlew release -PreleaseVersion=2026.10.23-2   # 补完一次中途失败的发布
-./gradlew releaseVersion                          # 只打印当前发布将使用的版本
-```
-
-派发前，`release` 必须满足：当前在 `main`、工作区干净、`HEAD` 与 `origin/main` 完全一致。落后和未推送会被分开
-报告，且**不会**替你执行 `git pull`。
-
-CI 会再校验同样的条件（提交必须仍是 `HEAD`，版本必须仍是“下一个可用”），然后构建、上传 maven，**最后才打 tag**
-并创建 GitHub release。这个顺序保证失败的发布不会消耗版本号。
-
-### 更新日志
-
-release notes 与 `CHANGELOG.md` 的条目来自“上一个发布 tag 到 `HEAD`”之间的提交，由 [git-cliff](https://git-cliff.org)
-按 [`cliff.toml`](cliff.toml) 生成，因此可以在任意 checkout 里复现：
-
-```
-git cliff 2026.10.23..HEAD --tag <版本>            # 该版本的 release notes
-```
-
-区间永远是显式传入的。同一天的 `-2` 发布在 SemVer 里是 *pre-release*（`2026.10.23-2` 排在 `2026.10.23` 之后），
-任何“按 SemVer 取最近两个 tag”的做法都会把它排到当天无后缀 tag 的后面，那个发布就没有日志可写——之前用的
-action 正是这么丢的。分节按 conventional commit 前缀：`feat` → Features、`fix` → Bug Fixes、`perf` → Performance、
-`refactor` → Refactor、`test` → Testing、`chore` → Miscellaneous Tasks，其余（包括没有前缀的提交）→ Other；
-`docs`/`style`/`build`/`ci` 丢弃，破坏性变更用 `[**breaking**]` 标出。
-
-### CI secrets
-
-只有一个：`OUTLANDS_MAVEN_TOKEN`（maven 发布令牌）。用户名 `fg` 不是秘密，直接写在 workflow 里。
-
-### 发布失败怎么办
-
-| 失败位置 | 留下了什么 | 处理 |
-|---|---|---|
-| 构建/测试 | 什么都没留，无 tag | 修好后 `./gradlew release`（同一个版本号） |
-| maven 上传 | 无 tag；部分上传会在其它步骤之前被识别出来 | 修好原因重跑；若已部分上传，先从 maven 删掉该版本 |
-| tag / GitHub release / CHANGELOG | 产物已在 maven，tag 可能已存在 | `./gradlew release -PreleaseVersion=<版本>` |
-
-tag 不会自动回退：它记录的是“哪个提交产出了这个版本”，而删 tag 也删不掉 maven 上的东西。想重跑已有 tag 的发布，
-不改 tag，直接用 resume。
-
-### 逃生口
-
-手动推 tag 依然可以触发发布，版本从 tag 名读取：
-
-```
-git tag 2026.10.23 && git push origin 2026.10.23
-```
-
-这条路径绕过了版本计算，请确认那个号确实没人用过。
+</details>

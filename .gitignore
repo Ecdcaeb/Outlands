@@ -1,27 +1,29 @@
+# IDEs and local tools
 /.idea/*
+!/.idea/icon.svg
 /.run/
-/.gradle/
 /.pi/
-/buildSrc/.gradle/
-/buildSrc/build/
-/buildSrc/out/
-/logs/
-build/
-version.txt
 /.serena/
 
-# generated source trees: these live in the project directory (not build/) so they can be read and diffed
+# Gradle and compiled output
+/.gradle/
+/buildSrc/.gradle/
+/buildSrc/out/
+build/
+version.txt
+
+# Generated Minecraft sources, kept outside build/ for reading and comparison
 /projects/mcpbase/minecraft/
 /projects/mcpbase/patched/
 
-!/.idea/icon.svg
-
+# Python caches
 /tools/**/__pycache__/
 
-# run logs from the dev server/client
+# Development runtime files
+/logs/
 projects/*/logs/
 projects/*/run/
 projects/*/crash-reports/
 
-# local notes and research write-ups stay out of the tree
+# Local notes and research
 /docs/

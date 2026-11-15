@@ -1,21 +1,11 @@
-// ForgeDev based replacement for the ':mcp' + ':minecraft' projects.
-//
-// The MCP layer owns everything that has to happen before any patch is applied:
-//   decompile -> MCPConfig patches -> mcpcleanup (processor) -> rename to MCP names
-//
-//   * access transformers must run on the *SRG* classes, before the rename, because forge_at.cfg uses SRG names
-//   * the processor (mcpcleanup) must run exactly once: it strips every '//' comment, which would destroy comments
-//     added by our own patches if it ran afterwards
-//
-// ':minecraft' had no patches of its own, so it is folded into this project: the "clean" base produced here is
-// what 'patches/minecraft' is applied to.
+// MCP pipeline: decompile -> MCPConfig patches -> mcpcleanup -> rename to MCP names.
+// Apply SRG access transformers before renaming. Run mcpcleanup before our patches because it strips // comments.
 
 plugins {
     id 'top.outlands.forgedev' version '7.0.0-beta.59-cr4'
 }
 
-// Gives this project source sets and the lifecycle tasks without any compilation. The only sources they describe
-// are the generated trees, see the source set at the bottom of this file.
+// Provides lifecycle tasks and source sets for the generated trees; compilation is disabled below.
 apply plugin: 'java-base'
 
 import top.outlands.gradle.helpers.ProjectConstants
@@ -49,20 +39,15 @@ forgedev {
         accessTransformers.from(file("$rootDir/src/main/resources/forge_at.cfg"))
     }
 
-    // The patch base. Same files as the old ForgeGradle 6 patcher used, but now every step lives in this project.
-    //
-    // 'patched' is generated into the project directory instead of build/: it is the tree the loader is compiled
-    // against and the one patches are written against, so it has to be readable, diffable against 'minecraft' and
-    // attachable in the IDE. 'clean' removes both trees explicitly (see below).
+    // Keep the patched sources next to the base tree for editing, comparison and IDE navigation.
+    // Both generated trees are removed by clean.
     patches {
         base = mcpBase
         patches.set(file("$rootDir/patches/minecraft"))
         patched.set(layout.projectDirectory.dir('patched'))
     }
-    // The patch set is maintained in MCP names and applied to the MCP-named base (that is what ForgeDev's patcher
-    // consumes). The result is the tree ':outlands' compiles and the one 'devSourcesJar' ships.
-    // Prefixes are kept at before/after and --auto-header is off so the files stay `git apply`/`patch -p1` compatible:
-    // ForgeDev defaults to '@@ -a,b +_,c @@' headers, which git's patch parser rejects.
+    // Patches use MCP names. Standard hunk headers and before/after prefixes support git apply -p1 and patch -p1
+    // from the source-tree root.
     patches.apply {
         basePathPrefix.set('before')
         modifiedPathPrefix.set('after')
@@ -76,8 +61,6 @@ forgedev {
     }
 }
 
-
-
 tasks.register('mcpInfo') {
     def base = forgedev.mcpBase
     def patches = forgedev.patches
@@ -89,8 +72,7 @@ tasks.register('mcpInfo') {
     }
 }
 
-// The unpatched, MCP named tree, materialized next to the patched one so the two can be diffed. 'applyPatches'
-// reads the jar directly; this task only exists for reading (and for 'git diff --no-index' style comparisons).
+// Extract the unpatched MCP sources for reading and comparison; applyPatches reads the source jar directly.
 tasks.register('extractBase', Sync) {
     group = 'build'
     description = 'Extracts the unpatched Minecraft sources next to the patched tree'
@@ -98,8 +80,7 @@ tasks.register('extractBase', Sync) {
     into(layout.projectDirectory.dir('minecraft'))
 }
 
-// The two trees live in the project directory, so they have to be deleted explicitly. 'clean' also takes build/ with
-// it, which is where ForgeDev keeps the decompile output - the price of starting over.
+// These generated trees live outside build/, so clean must remove them explicitly.
 tasks.named('clean') {
     delete layout.projectDirectory.dir('minecraft'), layout.projectDirectory.dir('patched')
 }
@@ -113,18 +94,7 @@ configurations {
     }
 }
 
-// The patch set is maintained in MCP names (it predates this build and lives in patches/minecraft that way).
-// The patched tree that ships with userdev is produced from the same sources, see 'devSourcesJar' in :outlands.
-
-// Both source trees are generated, but they exist to be read: 'patched' is a source directory of ':outlands' (that
-// is what gets compiled), so the IDE already indexes it. The base tree belongs to no compilation at all, and a
-// plain directory is not a source root - no indexing, no resolution, no navigation in the IDE.
-//
-// A source set fixes exactly that and nothing else. 'java-base' also gives it a 'compileMinecraftJava' task and
-// ':mcpbase:classes' would run it; it is switched off on purpose - the tree is compiled by ':outlands' (together
-// with the loader, which the vanilla sources do not need but the patched tree does), so compiling it a second time
-// here would only cost time. The classpath is the mcp config's own libraries, which is what those sources resolve
-// against, both in the IDE and if the task is ever re-enabled.
+// Index the unpatched tree with the MCP library classpath. Only :outlands compiles Minecraft, using the patched tree.
 sourceSets {
     minecraft {
         java.srcDirs = [layout.projectDirectory.dir('minecraft')]

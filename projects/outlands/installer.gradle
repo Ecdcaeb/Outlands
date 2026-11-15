@@ -1,8 +1,5 @@
-// Installer artifacts: install_profile.json + version.json (+ the installer jar that carries them).
-//
-// This is what launchers (MultiMC/Prism), the installer and dev tools (Unimined reads 'version.json' out of
-// the installer jar) consume. Ported from the ForgeGradle build, with the loader/universal jar now coming from
-// this project instead of the FG patcher.
+// Generate install_profile.json, launcher version.json and the installer jar that carries them.
+// Launchers and development tools also consume this metadata.
 
 import top.outlands.gradle.helpers.tasks.Util
 import groovy.json.JsonBuilder
@@ -77,11 +74,8 @@ tasks.register('launcherJson') {
             mainClass             : 'top.outlands.foundation.boot.Foundation',
             assetIndex            : vanilla.assetIndex,
             assets                : vanilla.assetIndex.id,
-            // The client/server jars the launcher fetches into 'versions/<id>/'. This profile does not inherit from
-            // '1.12.2' - it carries the whole library set instead - so the downloads have to be spelled out here,
-            // and they come from the MMC component the rest of the vanilla metadata is read from. The key used to be
-            // read as 'vanilla.downloads', which the template does not have, so it serialized as "downloads": null
-            // and left every launcher without a jar to launch.
+            // This profile includes the full vanilla library set without inheriting from 1.12.2,
+            // so it must provide explicit client and server jar downloads from the Minecraft component.
             downloads             : vanilla.downloads ?: [:],
             // Empty on purpose (Forge's 1.12.2 profile does the same): the loader ships its own log4j2.xml at the
             // jar root, so a vanilla 'logging.client.argument' would override it with Mojang's 1.12 config.
@@ -90,12 +84,9 @@ tasks.register('launcherJson') {
             complianceLevel       : 1,
             minimumLauncherVersion: 18,
             minecraftArguments    : gameArguments.join(' '),
-            // A modern launcher ignores 'minecraftArguments' once 'arguments' exists, so the game list is repeated
-            // here, and the JVM list has to carry the classpath/natives arguments a modern launcher does not add
-            // itself. The osx rule is what Foundation 1.1.0 needs on macOS: the game runs on its own thread and the
-            // process's first thread services SDL/Cocoa (RetroFuturaBootstrap layout), which only works with
-            // -XstartOnFirstThread. Prism parses this file with its legacy reader and ignores 'arguments', which is
-            // why the MultiMC pack declares the FirstThreadOnMacOS trait instead.
+            // Modern launchers need explicit game, classpath and native-library arguments here.
+            // Foundation needs -XstartOnFirstThread for SDL/Cocoa on macOS.
+            // Prism uses the legacy arguments and the pack's FirstThreadOnMacOS trait.
             arguments             : [
                 game: gameArguments,
                 jvm : [
@@ -113,8 +104,7 @@ tasks.register('launcherJson') {
             downloads: [
                 artifact: [
                     path: loaderPath,
-                    // A published build is fetchable by any launcher; a local one exists only in this workspace,
-                    // where the pack carries the jar itself ('MMC-hint: local'), so it keeps the empty url.
+                    // Release builds use Maven URLs; local packs carry the loader jar.
                     url : project.hasProperty('release') ? Util.MIRROR_MAVEN_URL + loaderPath : '',
                     sha1: Util.sha1(jarFile),
                     size: jarFile.length()
@@ -138,15 +128,8 @@ tasks.register('launcherJson') {
         }
         cache.lwjglNatives.each { key, lib -> json.libraries.add(lib) }
 
-        // One entry per *kind* of library, last one wins. Two sources feed this list - the MMC component (vanilla's
-        // libraries, with the natives/rule overrides MultiMC needs) and the resolved artifacts (everything the
-        // loader adds) - and they overlap, so the list has to be collapsed.
-        //
-        // The key includes whether the entry is a natives entry, because the same coordinate is legitimately listed
-        // twice: 'com.mojang:text2speech:1.10.3' appears once as a plain artifact (the jar that carries the classes,
-        // i.e. the one that puts com.mojang.text2speech.Narrator on the classpath) and once with a 'natives' map
-        // (extraction only - launchers keep those off the classpath). Keying on the name alone merges the two and
-        // silently drops whichever came first, which is a NoClassDefFoundError for Narrator on every launch.
+        // Merge overlapping vanilla and loader library lists, keeping the last entry per coordinate and kind.
+        // Preserve classpath artifacts and native-extraction entries separately; text2speech requires both.
         def byKey = new LinkedHashMap<String, Object>()
         json.libraries.each { lib ->
             def key = lib.name as String
@@ -155,9 +138,7 @@ tasks.register('launcherJson') {
         }
         json.libraries = new ArrayList(byKey.values())
 
-        // MultiMC's component metadata leaves 'downloads.artifact.path' out and derives it from the Maven
-        // coordinate, while Forge-style launcher JSON carries it explicitly. Fill in the vanilla entries copied
-        // from the template so launchers that require 'path' can resolve them, native classifiers included.
+        // Add explicit Maven paths for launchers that cannot derive them, including native classifiers.
         def artifactPath = { String name, String classifier ->
             def parts = name.split(':')
             def versionParts = parts[2].split('@')
@@ -222,11 +203,9 @@ tasks.register('installerJson') {
             path      : loaderCoords,
             logo      : '/big_logo.png',
             minecraft : mcVersion,
-            // Shown verbatim in the installer GUI's header (Forge's installer reads this field as plain text, it
-            // is not a translation key), so it has to be the sentence itself.
+            // The installer displays this text directly, without translation-key lookup.
             welcome   : "Welcome to the simple ${rootProject.name} installer.",
-            // Object, not array: this is a key/value map in the installer spec (Forge writes '{}') and launchers
-            // deserialize it as one - an empty list here fails to parse before anything is installed.
+            // The installer spec requires a key/value object, including when empty.
             data      : [:],
             processors: [],
             libraries : libs.values().sort { a, b -> a.name <=> b.name }
@@ -236,25 +215,13 @@ tasks.register('installerJson') {
 }
 
 // region installer jar -----------------------------------------------------
-// The installer jar is Forge's installer program with our metadata dropped into it: 'install_profile.json' and
-// 'version.json' at the root, and the loader jar under 'maven/' where SimpleInstaller looks for it. That program
-// reads the profile, downloads the vanilla jar and every library (extracting ours from '/maven/' when the profile
-// carries no url for it), and injects a launcher profile - which is why the metadata has to stay in Forge's shape.
-//
-// It is not a Zip task: the archive is the installer, so it needs the fatjar's META-INF/MANIFEST.MF
-// (Main-Class: net.minecraftforge.installer.SimpleInstaller). Without a manifest 'java -jar' refuses the file as
-// 'Invalid or corrupt jarfile', which is what a metadata-only Zip produced.
-//
-// Upstream Forge, not a rebrand: its window title says 'Forge Installer'. That is deliberate (see the dependency in
-// dependencies.gradle), so do not 'fix' it by editing the panel - the string is compiled into the artifact.
+// Bundle Forge's installer with our metadata and the loader jar under maven/.
+// Preserve its executable manifest so java -jar works; upstream GUI branding remains Forge Installer.
 tasks.register('installerJar', Jar) {
     dependsOn 'installerJson', 'launcherJson'
     archiveClassifier = 'installer'
     destinationDirectory = layout.buildDirectory.dir('libs')
-    // The installer program's classes, but not its manifest: a Jar task always writes META-INF/MANIFEST.MF from its
-    // own 'manifest' block, so a copied one would be shadowed by an empty one and the jar would lose its Main-Class.
-    // The attributes are taken from the artifact instead of being spelled out here, so bumping the installer cannot
-    // leave a stale main class behind.
+    // Read the executable manifest separately: Gradle's Jar task writes its own manifest and would shadow a copy.
     from({ zipTree(configurations.installerApp.singleFile) }) {
         exclude 'META-INF/MANIFEST.MF'
     }
@@ -287,12 +254,8 @@ tasks.named('assemble') {
 // endregion
 
 // region stale library guard ------------------------------------------------
-// 1.12.2's own library set is only needed on the decompile classpath (the mcp_config 'listLibraries' output).
-// Several of those modules were renamed rather than upgraded, so Gradle's version conflict resolution cannot
-// see the problem: 'netty-all' (an io.netty.* fat jar) happily coexists next to the split 4.2 modules and wins
-// or loses the classpath race at random, which shows up as NoSuchMethodError at compile time or
-// AbstractMethodError at runtime. The transformer that used to enforce this list went away with the FG6 chain,
-// so the list is the only thing that keeps them off the installer now.
+// Renamed vanilla modules can coexist with their replacements because Gradle treats them as separate artifacts.
+// Reject these stale libraries before they cause classpath conflicts in the installer or development runs.
 def staleVanillaModules = [
     'io.netty:netty-all',
     'org.lwjgl.lwjgl:lwjgl',
@@ -312,8 +275,7 @@ tasks.register('verifyNoStaleLibraries') {
     dependsOn 'installerArtifacts', 'launcherJson'
     def artifactsFile = tasks.named('installerArtifacts').flatMap { it.outputs.files.elements.map { it.first().asFile } }
     def versionJsonFile = layout.buildDirectory.file('version.json')
-    // The dev runs launch from the resolved runtime classpath, not from version.json: 'mcpbaseLibraries' drags in
-    // 1.12.2's own library set transitively, which can reintroduce a module the packaged artifacts already exclude.
+    // Development runs use the runtime classpath, which can reintroduce transitive vanilla libraries.
     def runtimeConfiguration = configurations.runtimeClasspath
     inputs.files(artifactsFile, versionJsonFile, runtimeConfiguration)
 

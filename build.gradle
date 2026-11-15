@@ -26,19 +26,9 @@ def sysProps = System.getProperties()
 
 group = 'top.outlands'
 
-// region version -------------------------------------------------------------
-// CalVer, YYYY.MM.DD, in UTC so that a build on two different machines on the same day agrees. Nothing else goes
-// into the version: no commit distance, no dirty flag, no CI run number. A build is therefore not identifiable by
-// its version alone, and repeated builds on one day produce the same file names on purpose (they overwrite rather
-// than accumulate).
-//
-// Same-day releases are only ever numbered at publish time: the first one of the day is 'YYYY.MM.DD', the next ones
-// are 'YYYY.MM.DD-2', 'YYYY.MM.DD-3', ... CalVer's RELEASE modifier starts at 2 for the second build, and Maven's
-// ComparableVersion ranks '2026.10.23-2' above '2026.10.23', so 'latest'/'release' keep resolving forwards.
-//
-// CI never invents a suffix of its own: 'Prepare Release' computes it, creates the matching tag, and the tag then
-// feeds both values back into the release build (-PcalverDate/-PcalverSuffix), so the published version and the tag
-// can not drift apart.
+// region version
+// UTC CalVer: YYYY.MM.DD. Local builds on the same day share a version and overwrite the same artifacts.
+// Releases add -2, -3, ... after the first release of a day; CI passes the selected date and suffix explicitly.
 def calverFormat = java.time.format.DateTimeFormatter.ofPattern('yyyy.MM.dd')
 def calverDate = (findProperty('calverDate')
         ?: java.time.LocalDate.now(java.time.ZoneOffset.UTC).format(calverFormat)).toString()
@@ -58,7 +48,6 @@ println "Setting up Outlands ${version}"
 println "Java: ${ -> sysProps['java.version']} | JVM: ${ -> sysProps['java.vm.version']} | Vendor: ${ -> sysProps['java.vendor']} | Architecture: ${ -> sysProps['os.arch']}"
 // endregion
 
-// Initialize buildSrc
 Util.init()
 
 tasks.withType(JavaCompile).configureEach {
@@ -68,19 +57,14 @@ tasks.withType(JavaCompile).configureEach {
 
 idea.project.settings.compiler.javac.javacAdditionalOptions = ProjectConstants.COMPILER_JVM_ARGUMENTS.join(' ')
 
-// region release -------------------------------------------------------------
-// Maintainer entry point: './gradlew release'. It never builds or publishes locally; it verifies the repository
-// state, computes the version, and asks CI to do the work (see .github/workflows/Release.yml). The version
-// arithmetic lives in one place - ReleaseVersionTask - which CI also runs to check that the version it was asked to
-// publish is still the next free one.
-//
-// It also waits for the run and confirms the result, which needs a token that can read releases as well as dispatch
-// workflows (fine-grained PAT: 'Actions: Read and write' + 'Contents: Read'). Without the contents permission the
-// release still succeeds - the workflow verifies itself - the confirmation is just reported as unavailable.
+// region release
+// Verify the checkout, select a version and dispatch CI; releaseVersion also validates that version in CI.
+// The token needs Actions: Read and write. Contents: Read enables the final GitHub release confirmation.
+// CI builds, publishes and creates the tag; this task can wait for the result.
 def releaseRepository = 'Project-Outlands/Outlands'
 def releaseMavenMetadataUrl = 'https://maven.outlands.top/releases/top/outlands/outlands/maven-metadata.xml'
 def releaseBranch = 'main'
-// 'origin' unless overridden: handy for testing against a mirror or a local clone (-PgitRemote=<name|path>)
+// Override with -PgitRemote=<name|path> when using another remote.
 def releaseGitRemote = providers.gradleProperty('gitRemote').getOrElse('origin')
 
 tasks.register('releaseVersion', top.outlands.gradle.helpers.tasks.ReleaseVersionTask) { task ->

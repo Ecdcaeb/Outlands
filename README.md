@@ -1,186 +1,159 @@
 # Outlands
 
-A 1.12.2 mod loader. It replaces the old ForgeGradle based build with a self contained one: the MCP pipeline
-(decompile, access transformers, cleanup, rename), the patch set, the loader sources, the binary patches, the
-installer and the launcher pack are all produced from this repository.
+Outlands is a mod loader for Minecraft 1.12.2. This repository contains the loader, Minecraft patches and the build tooling used to create installers, development artifacts and launcher instance packs.
 
-`README-zh.md` is the Chinese version of this file.
+[中文](README-zh.md) · [Downloads and usage](#downloads-and-usage) · [Building and development](#building-and-development) · [Maintenance and releases](#maintenance-and-releases)
 
-## Requirements
+## Downloads and usage
 
-* JDK 25 (`java -version`)
-* Nothing else: the Gradle wrapper downloads Gradle itself, and the patch/decompile tooling comes from maven
+Download a version from [GitHub Releases](https://github.com/Project-Outlands/Outlands/releases). Choose the file for your setup:
 
-## Building
-
-```
-./gradlew setup      # decompile + patch Minecraft (only needed once, and after patch changes)
-./gradlew build      # compile the loader, reobfuscate, generate binary patches, package
-```
-
-Artifacts land in `projects/outlands/build/libs/`:
-
-| File | What it is |
+| Release file | Usage |
 |---|---|
-| `outlands-<version>.jar` | the loader ("universal") jar |
-| `outlands-<version>-installer.jar` | Forge's installer program (GUI + `--installClient`/`--installServer`) carrying our `install_profile.json`, `version.json` and the universal jar |
-| `outlands-<version>-sources.jar` | loader sources (what userdev consumers inject) |
-| `outlands-<version>-userdev.jar` | userdev artifact for mod development setups |
-| `outlands-<version>-srg.jar` | reobfuscated classes (consumed by userdev tooling) |
-| `outlands-<version>.zip` / `outlands-<version>-local.zip` | MultiMC/Prism instance pack (`-local` carries the jar itself) |
+| `outlands-<version>.zip` | Import as a MultiMC/Prism instance. The launcher downloads the published loader and its dependencies. |
+| `outlands-<version>-installer.jar` | Run the installer GUI, or use `--installClient` / `--installServer`. |
+| `outlands-<version>.jar` | Universal loader JAR for integrations that use it directly. |
 
-`-Prelease` builds the launcher pack against the published maven URL instead of pointing at the local jar.
+Test builds are available as artifacts from the [build workflow](https://github.com/Project-Outlands/Outlands/actions/workflows/BuildTest.yml).
 
-### Version
+For mod development, Maven coordinates are `top.outlands:outlands:<version>` at [Outlands Maven](https://maven.outlands.top/releases/). Available classifiers are `userdev`, `installer`, `sources`, `srg`, `dev-sources`, `devenv` and `mmc`. The `mmc` artifact is named `outlands-<version>-mmc.zip`; it contains the same pack attached to the GitHub release as `outlands-<version>.zip`.
 
-CalVer, `YYYY.MM.DD`, in UTC, with nothing else in it - no commit distance, no dirty flag, no CI run number. Two
-builds on the same day therefore produce the same file names and overwrite each other.
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
-Only *releases* get a number: the first release of a day is `2026.10.23`, the next ones are `2026.10.23-2`,
-`2026.10.23-3`, ... That suffix is decided when publishing, never by a local build. `-PcalverDate=2026.10.23
--PcalverSuffix=-2` reproduces a specific release locally.
+Report bugs in [Issues](https://github.com/Project-Outlands/Outlands/issues). Propose features in [Discussions](https://github.com/Project-Outlands/Outlands/discussions) after reading the [proposal guidelines](CFP_GUIDELINES.md).
 
-## Dev runs
+## Building and development
 
+### Requirements and build
+
+Use JDK 25 for Gradle and compilation, with JDK 8 available for ForgeDev's tooling. CI installs both. The Gradle wrapper downloads Gradle; build dependencies and tools are resolved from Maven repositories.
+
+Run from the repository root. On Windows, use `gradlew.bat` in place of `./gradlew`.
+
+```sh
+./gradlew setup      # Prepare the base and patched Minecraft sources
+./gradlew build      # Compile, generate binary patches and package
 ```
+
+Run `setup` on the first checkout and after changing patches. Build outputs are in `projects/outlands/build/libs/`:
+
+| File | Contents |
+|---|---|
+| `outlands-<version>.jar` | Universal loader |
+| `outlands-<version>-installer.jar` | Installer with the loader and installation profiles |
+| `outlands-<version>-sources.jar` | Loader sources |
+| `outlands-<version>-userdev.jar` | Mod development configuration and patches |
+| `outlands-<version>-srg.jar` | Reobfuscated classes |
+| `outlands-<version>-dev-sources.jar` | Loader and patched Minecraft sources |
+| `outlands-<version>-devenv.zip` | Development mappings and metadata |
+| `outlands-<version>-local.zip` | Local instance pack, including the loader JAR |
+
+`./gradlew build -Prelease` creates `outlands-<version>.zip` instead of the local pack. It references the published loader download URL, so that loader version must be available remotely to use the pack. The flag alone does not publish anything.
+
+Versions use UTC CalVer (`YYYY.MM.DD`). Local builds on the same day share filenames. Releases on the same day use `YYYY.MM.DD`, then `YYYY.MM.DD-2`, `YYYY.MM.DD-3`, and so on. To reproduce a release version locally:
+
+```sh
+./gradlew build -PcalverDate=2026.10.23 -PcalverSuffix=-2
+```
+
+### Development runs
+
+```sh
 ./gradlew runOutlandsClient
 ./gradlew runOutlandsServer
 ```
 
-Both run out of `projects/outlands/run/`. The classpath is the project's runtime classpath (the mcp config's
-libraries plus its `extra` jar for the resources inside the client jar), and FML is booted directly through
-`net.minecraftforge.boot.MainClient` - no launcher sits in between, so nothing would fetch the vanilla assets.
-`runOutlandsClient` downloads them first: the asset index and its 1305 objects (sounds, the 105 languages besides
-`en_us`, the realms icons) go into `$GRADLE_USER_HOME/caches/outlands/assets`. It is a cache - fetched once, reused
-afterwards, untouched by `clean` - and only the client run depends on it.
+Both use `projects/outlands/run/` as their working directory. The client task downloads Minecraft assets to `<Gradle user home>/caches/outlands/assets`; subsequent runs reuse this cache, and `clean` leaves it intact.
 
-| Property | Meaning |
+| Property | Purpose |
 |---|---|
-| `-PassetDirectory=<dir>` | Use an existing assets directory (a launcher's, for example) instead of downloading |
-| `-PassetsRepo=<url>` | Object host, defaults to `https://resources.download.minecraft.net/` |
-| `-PassetsConnections=<n>` | Parallel downloads, default 8 |
+| `-PassetDirectory=<dir>` | Use an existing assets directory and skip automatic downloads |
+| `-PassetsRepo=<url>` | Asset object host; defaults to `https://resources.download.minecraft.net/` |
+| `-PassetsConnections=<n>` | Parallel asset downloads; defaults to 8 |
+| `-PnativesDirectory=<dir>` | Override the native library directory |
 
-## Repository layout
+### Repository layout
 
 | Path | Contents |
 |---|---|
-| `projects/mcpbase` | MCP layer: decompile, access transformers, mcpcleanup, patch application. Generates the two source trees below `projects/mcpbase/minecraft` and `.../patched` |
-| `projects/outlands` | loader sources (compiled against the patched Minecraft), reobf, binary patches, packaging, userdev, installer, launcher pack |
-| `patches/minecraft` | the patched Minecraft sources, as git-applyable patches |
-| `templates` | `LoaderVersion.java`, filled in with the current version at build time |
-| `buildSrc` | the build plugins/tasks (`top.outlands.gradle.*`) |
-| `legacy/fg6` | the previous ForgeGradle 6 build scripts, kept for reference only |
+| [src](src) | Loader sources and tests |
+| [projects/mcpbase](projects/mcpbase) | Minecraft source preparation and patch tasks |
+| [projects/outlands](projects/outlands) | Loader build, development runs and packaging |
+| [patches/minecraft](patches/minecraft) | Minecraft source patches |
+| [buildSrc](buildSrc) | Gradle plugins and tasks |
+| [templates](templates) | Generated loader version template |
+| [mmcpack-template](mmcpack-template) | Launcher instance templates |
+| [tools/lwjgl2diff](tools/lwjgl2diff) | LWJGL comparison tooling |
 
-Published coordinates for mod developers: `top.outlands:outlands:<version>` (plus the `userdev`, `installer`,
-`sources`, `srg`, `dev-sources`, `devenv` and `mmc` classifiers), from `https://maven.outlands.top/releases`.
-The `mmc` classifier is the launcher pack (`outlands-<version>-mmc.zip`), i.e. the same zip a release attaches.
+## Maintenance and releases
 
-## Maintaining patches
+### Minecraft patches
 
-Minecraft sources are modified through `patches/minecraft/**.java.patch`. They are plain unified diffs with
-`before/` + `after/` prefixes and full hunk headers, so `git apply -p2`, `patch -p2` and IDE tooling all understand
-them.
+Maintain Minecraft changes in `patches/minecraft/**/*.java.patch`. These are unified diffs with `before/` and `after/` prefixes. From the root of an extracted base tree, use `git apply -p1` or `patch -p1`; IDE diff tools can also read them.
 
-* `./gradlew :outlands:checkPatches` verifies that every patch still applies
-* `:mcpbase:makePatches` regenerates the patch set from `projects/mcpbase/patched`
+`setup` generates two source trees: `projects/mcpbase/minecraft` is the unpatched base, and `projects/mcpbase/patched` has the patches applied. Edit the patched tree, then regenerate and check the patch set:
 
-The unpatched base is materialized next to the patched tree, both MCP named, both generated (gitignored) and both
-removed by `:mcpbase:clean`:
+```sh
+./gradlew :mcpbase:makePatches
+./gradlew :outlands:checkPatches
+```
 
-| Path | Contents |
+Use `:mcpbase:extractBase` or `:mcpbase:applyPatches` to regenerate the respective tree. Both trees are ignored by Git and removed by `:mcpbase:clean`; keep source changes in the patch files before cleaning. Compare the trees in an IDE or with:
+
+```sh
+diff -ru projects/mcpbase/minecraft projects/mcpbase/patched
+```
+
+<details>
+<summary>Release setup, commands and recovery</summary>
+
+### Release setup
+
+The [release workflow](.github/workflows/Release.yml) builds and publishes releases. `./gradlew release` checks the checkout, computes the version and dispatches CI, then waits for its result. It does not upload local artifacts. The checkout must be on `main`, clean and at the same commit as `origin/main`.
+
+Create a fine-grained GitHub personal access token restricted to `Project-Outlands/Outlands`:
+
+- `Actions: Read and write` to dispatch and monitor the workflow.
+- `Contents: Read` to let the local task confirm the GitHub release afterward, including in a private repository. Without it, CI can still complete, but local release confirmation may be unavailable.
+
+Store the token outside the repository in `~/.gradle/gradle.properties` (Windows: `%USERPROFILE%\.gradle\gradle.properties`):
+
+```properties
+releaseToken=REPLACE_WITH_YOUR_TOKEN
+```
+
+Alternatively, supply `OUTLANDS_RELEASE_TOKEN` through your environment or secret manager, or pass `-PreleaseToken=<token>`. Avoid entering real tokens directly into shell commands: literal values in either command-line arguments or environment assignments can enter shell history. Keep credential files private and out of version control.
+
+CI needs the `OUTLANDS_MAVEN_TOKEN` secret for Maven publishing; its publishing username is `fg`.
+
+### Release commands
+
+```sh
+./gradlew release                               # Check, dispatch CI and wait
+./gradlew release -PdryRun                      # Check and print the planned release without dispatching
+./gradlew release -PnoWait                      # Dispatch and print the workflow URL
+./gradlew release -PreleaseVersion=2026.10.23-2  # Resume a specific release
+./gradlew releaseVersion                        # Print the next release version
+```
+
+Optional properties: `-PgitRemote=<name|path>` selects a remote instead of `origin`; `-PreleaseTimeout=<minutes>` changes the wait timeout (default 20 minutes).
+
+CI checks the requested commit and version, builds, uploads to Maven, then creates the tag and GitHub release. Local builds resolve `mavenLocal()` first, while CI has no local artifacts. Publish required `top.outlands` tooling dependencies to Outlands Maven before releasing; use an init script that removes `mavenLocal()` when reproducing CI dependency resolution locally.
+
+Release notes and [CHANGELOG.md](CHANGELOG.md) are generated by [git-cliff](https://git-cliff.org) using [cliff.toml](cliff.toml). To reproduce notes, pass the previous tag and target version explicitly:
+
+```sh
+git cliff 2026.10.23..HEAD --tag 2026.10.23-2
+```
+
+### Release recovery
+
+| Failure | Recovery |
 |---|---|
-| `projects/mcpbase/minecraft` | the base, no patches applied (`:mcpbase:extractBase`) |
-| `projects/mcpbase/patched` | `patches/minecraft` applied (`:mcpbase:applyPatches`) |
+| Build or checks, before upload | Fix the cause and run `./gradlew release` again. No tag has been created. |
+| Maven upload | Fix the cause and retry. If the version is partially uploaded, remove that version from Maven first; CI refuses partial publications. |
+| Tag, GitHub release or changelog after upload | Run `./gradlew release -PreleaseVersion=<version>`. CI skips a complete Maven upload and reuses an existing tag. |
 
-So a patch can be read as a diff without any tooling: `diff -ru projects/mcpbase/minecraft projects/mcpbase/patched`,
-or the two directories can be compared side by side in an IDE. `:outlands` compiles the patched tree directly.
+Tags are not rolled back automatically. Keep the existing tag when resuming a release. A pushed CalVer tag also triggers the workflow; this bypasses local version selection, so reserve that path for a version you have confirmed is free.
 
-The base tree is registered as a source set of `:mcpbase` so IDEs index it (`compileMinecraftJava` is disabled -
-nothing compiles it, `:outlands` already compiles the patched tree); that is also what gives its imports a
-classpath to resolve against.
-
-## Releasing (maintainers)
-
-> Local builds resolve `mavenLocal()` before anything else, CI does not. Anything this build takes from the
-> `top.outlands` fork (the ForgeDev plugin, the mavenizer, ...) has to be published to `maven.outlands.top`, or the
-> release build will fail where a local one succeeds. `--init-script` with `mavenLocal` removed is a good way to
-> reproduce CI locally.
-
-Releases are built and published by CI (`Release.yml`); nothing is ever uploaded from a laptop. `./gradlew release`
-only *asks* CI to do it, so it never mutates the repository or publishes a local build.
-
-### One-time setup
-
-Create a fine-grained personal access token for your own GitHub account:
-
-* Repository access: only `Project-Outlands/Outlands`
-* Permissions: `Actions: Read and write` (nothing else)
-
-Put it outside the repository:
-
-```
-echo 'releaseToken=github_pat_...' >> ~/.gradle/gradle.properties
-# Windows: %USERPROFILE%\.gradle\gradle.properties
-```
-
-Alternatively pass `-PreleaseToken=...` or set `OUTLANDS_RELEASE_TOKEN` (environment variables are easier to leak
-into shell history, the properties file is the recommended place).
-
-### Commands
-
-```
-./gradlew release                                 # verify, compute the version, dispatch CI, wait for the result
-./gradlew release -PdryRun                        # only verify and print what would be released
-./gradlew release -PnoWait                        # dispatch and return immediately (prints the run URL)
-./gradlew release -PreleaseVersion=2026.10.23-2   # finish a release that broke half way
-./gradlew releaseVersion                          # just print the version a release would use
-```
-
-Before dispatching, `release` refuses to continue unless: you are on `main`, the working tree is clean, and `HEAD`
-is exactly `origin/main`. It reports "behind" and "not pushed" separately and never runs `git pull` for you.
-
-CI then re-checks the same things (the commit must still be `HEAD`, and the version must still be the next free one),
-builds, uploads to maven, **and only then creates the tag** and the GitHub release. That ordering is what keeps a
-failed release from consuming a version number.
-
-### Changelog
-
-Release notes and the `CHANGELOG.md` entry come from the commits between the previous release tag and `HEAD`, rendered
-by [git-cliff](https://git-cliff.org) with [`cliff.toml`](cliff.toml), so they can be reproduced from any checkout:
-
-```
-git cliff 2026.10.23..HEAD --tag <version>            # the release notes for <version>
-```
-
-The range is always passed explicitly. A same-day `-2` release is a SemVer *pre-release* (`2026.10.23-2` sorts below
-`2026.10.23`), so anything that picks "the two newest tags" by SemVer puts it below the plain tag of that day and the
-release ends up without notes - which is what the previous changelog action did. Sections follow the conventional
-commit type (`feat` → Features, `fix` → Bug Fixes, `perf` → Performance, `refactor` → Refactor, `test` → Testing,
-`chore` → Miscellaneous Tasks, anything else - including commits without a type - → Other); `docs`/`style`/`build`/`ci`
-are dropped, and a breaking change is flagged with `[**breaking**]`.
-
-### CI secrets
-
-Only one: `OUTLANDS_MAVEN_TOKEN` (the maven publishing token). The user name `fg` is not a secret and is used
-literally in the workflow.
-
-### When a release fails
-
-| Where it failed | What is left behind | What to do |
-|---|---|---|
-| build / tests | nothing, no tag | fix, then `./gradlew release` (same version) |
-| maven upload | nothing, no tag (a partial upload is detected before anything else) | fix the cause, re-run; if the version is half published, delete that version from maven first |
-| tag / GitHub release / CHANGELOG | artifacts are on maven, tag may exist | `./gradlew release -PreleaseVersion=<version>` |
-
-Tags are never rolled back automatically: a tag records which commit produced a version, and deleting it would not
-remove anything from maven anyway. To continue a release whose tag already exists, use `-PreleaseVersion=<version>`.
-
-### Escape hatch
-
-Pushing a tag by hand still releases, and the version is read from the tag name:
-
-```
-git tag 2026.10.23 && git push origin 2026.10.23
-```
-
-This bypasses the version computation, so only use it when you know the number is free.
+</details>
